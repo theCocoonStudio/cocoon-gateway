@@ -1,0 +1,19 @@
+{
+  "roles": {
+    "claude": { "cn": "claude" }
+  },
+  "rules": [
+    { "role": "claude", "upstream": "github",    "method": "GET",   "path": "^(/api/v3)?/.*" },
+    { "role": "claude", "upstream": "github",    "method": "POST",  "path": "^(/api/v3)?/repos/[^/]+/[^/]+/(pulls|issues)$" },
+    { "role": "claude", "upstream": "github",    "method": "POST",  "path": "^(/api/v3)?/repos/[^/]+/[^/]+/(pulls|issues)/[0-9]+/(reviews|comments)$" },
+    { "role": "claude", "upstream": "github",    "method": "PATCH", "path": "^(/api/v3)?/repos/[^/]+/[^/]+/pulls/[0-9]+$" },
+    { "role": "claude", "upstream": "github",    "method": "PUT",   "path": "^(/api/v3)?/repos/[^/]+/[^/]+/pulls/[0-9]+/(merge|update-branch)$" },
+    { "role": "claude", "upstream": "github",    "method": "POST",  "path": "^(/api/graphql|/graphql)$" },
+    { "role": "claude", "upstream": "git",       "method": "GET",   "path": "^/[^/]+/[^/]+(\\.git)?/info/refs$" },
+    { "role": "claude", "upstream": "git",       "method": "POST",  "path": "^/[^/]+/[^/]+(\\.git)?/git-(upload|receive)-pack$" },
+    { "role": "claude", "upstream": "anthropic", "method": "POST",  "path": "^/v1/messages(/count_tokens)?$" },
+    { "role": "claude", "upstream": "anthropic", "method": "GET",   "path": "^/v1/models.*" },
+    { "role": "claude", "upstream": "arxiv",        "method": "GET", "path": ".*" },
+    { "role": "claude", "upstream": "export-arxiv", "method": "GET", "path": ".*" }
+  ]
+}
