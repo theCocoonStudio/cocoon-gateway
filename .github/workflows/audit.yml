@@ -1,0 +1,27 @@
+# The dependency check on a schedule: the owner's rule for every deployed repository
+# (2026-10-11). Daily and on demand: the lockfile against GitHub's advisory database through
+# npm audit (scripts/audit.sh, each finding with its severity and CVSS score; red at or above
+# moderate), and what is outdated, listed. A red scheduled run is an email to the owner. Not a
+# PR status: `check` runs the same audit on every PR; this one catches an advisory published
+# after the last merge. Other databases (OSV, NVD, Snyk, Black Duck) are options for later.
+name: audit
+on:
+  schedule:
+    - cron: "23 10 * * *" # daily 10:23 UTC
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: outdated, listed (never red by itself)
+        run: npm outdated || true
+      - name: advisories, red at or above moderate
+        run: bash scripts/audit.sh moderate
