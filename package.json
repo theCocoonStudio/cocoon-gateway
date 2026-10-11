@@ -1,0 +1,19 @@
+{
+  "name": "cocoon-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The owner's API gateway for the agent sandbox: one host in the wall, one policy table, every credential here and none in the container.",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test",
+    "audit": "bash scripts/audit.sh",
+    "check": "node --test && bash scripts/audit.sh"
+  },
+  "dependencies": {
+    "express": "5.3.0"
+  }
+}
