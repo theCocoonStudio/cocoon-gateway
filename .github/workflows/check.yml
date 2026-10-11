@@ -1,0 +1,19 @@
+# The one check a PR must pass, run where nobody has to remember it: the tests (node:test,
+# no test framework to trust) and the dependency audit (scripts/audit.sh: npm audit at or
+# above moderate fails). Made a required status in the main ruleset, it binds.
+name: check
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run check
