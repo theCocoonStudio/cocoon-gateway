@@ -30,8 +30,8 @@ done
 usage() { sed -n '2,20p' "$0" >&2; exit 1; }
 [ $# -ge 2 ] || usage
 cmd=$1; dir=$2; shift 2
-mkdir -p "$dir"
-chmod 700 "$dir"
+mkdir -p -- "$dir"
+chmod 700 -- "$dir"
 
 fresh() { # refuse to overwrite: a certificate replaced by accident is a trust change nobody reviewed
   for f in "$@"; do [ -e "$dir/$f" ] && { echo "certs: $dir/$f exists; remove it yourself first" >&2; exit 1; }; done
@@ -64,7 +64,7 @@ case "$cmd" in
     openssl req -new -key "$dir/server.key" -subj "/CN=gateway.$domain" -out "$dir/server.csr"
     openssl x509 -req -in "$dir/server.csr" -CA "$dir/root.crt" -CAkey "$dir/root.key" -CAcreateserial -sha256 -days 825 \
       -extfile "$ext" -out "$dir/server.crt"
-    rm -f "$dir/server.csr"
+    rm -f -- "$dir/server.csr"
     echo "certs: server written for $san: $dir/server.key (600) and $dir/server.crt; copy both with root.crt to the gateway host"
     ;;
   client)
@@ -79,7 +79,7 @@ case "$cmd" in
     openssl req -new -key "$dir/$role.key" -subj "/CN=$role" -out "$dir/$role.csr"
     openssl x509 -req -in "$dir/$role.csr" -CA "$dir/root.crt" -CAkey "$dir/root.key" -CAcreateserial -sha256 -days 825 \
       -extfile "$ext" -out "$dir/$role.crt"
-    rm -f "$dir/$role.csr"
+    rm -f -- "$dir/$role.csr"
     (umask 077 && openssl rand -hex 32 > "$dir/$role.token")
     echo "certs: client written for role '$role': $dir/$role.key (600), $dir/$role.crt, $dir/$role.token (600); the sandbox host gets these with root.crt, the gateway host gets a copy of the token as GATEWAY_TOKEN_$(printf '%s' "$role" | tr 'a-z-' 'A-Z_')"
     ;;
