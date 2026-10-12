@@ -13,6 +13,7 @@
     { "role": "claude", "upstream": "git",       "method": "POST",  "path": "^/[^/]+/[^/]+(\\.git)?/git-(upload|receive)-pack$" },
     { "role": "claude", "upstream": "anthropic", "method": "POST",  "path": "^/v1/messages(/count_tokens)?$" },
     { "role": "claude", "upstream": "anthropic", "method": "GET",   "path": "^/v1/models.*" },
+    { "role": "claude", "upstream": "npm",          "method": "GET", "path": ".*" },
     { "role": "claude", "upstream": "arxiv",        "method": "GET", "path": ".*" },
     { "role": "claude", "upstream": "export-arxiv", "method": "GET", "path": ".*" }
   ]
