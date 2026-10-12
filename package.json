@@ -11,7 +11,8 @@
     "start": "node src/server.js",
     "test": "node --test",
     "audit": "bash scripts/audit.sh",
-    "check": "node --test && bash scripts/audit.sh"
+    "check": "shellcheck scripts/*.sh && node --test && bash scripts/audit.sh",
+    "lint": "shellcheck scripts/*.sh"
   },
   "dependencies": {
     "express": "5.2.1"
