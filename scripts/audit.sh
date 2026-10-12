@@ -5,8 +5,9 @@
 # are options for later; GitHub's lags the curated ones.
 set -uo pipefail
 THRESHOLD=${1:-moderate}   # low | moderate | high | critical
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 npm audit --audit-level="$THRESHOLD" --json > audit.json; status=$?
+# shellcheck disable=SC2016  # a JavaScript program in single quotes; nothing to expand
 node -e '
 const a = JSON.parse(require("fs").readFileSync("audit.json", "utf8"));
 const v = a.metadata && a.metadata.vulnerabilities || {};
