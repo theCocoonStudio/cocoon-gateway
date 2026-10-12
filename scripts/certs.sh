@@ -61,7 +61,7 @@ case "$cmd" in
     newkey "$dir/server.key"
     ext=$(mktemp); trap 'rm -f "${ext:?}"' EXIT
     printf 'basicConstraints=CA:FALSE\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=serverAuth\nsubjectAltName=%s\n' "$san" > "$ext"
-    openssl req -new -key "$dir/server.key" -subj "/CN=gateway.$domain" -out "$dir/server.csr"
+    openssl req -new -sha256 -key "$dir/server.key" -subj "/CN=gateway.$domain" -out "$dir/server.csr"
     openssl x509 -req -in "$dir/server.csr" -CA "$dir/root.crt" -CAkey "$dir/root.key" -CAcreateserial -sha256 -days 825 \
       -extfile "$ext" -out "$dir/server.crt"
     rm -f -- "$dir/server.csr"
@@ -76,7 +76,7 @@ case "$cmd" in
     newkey "$dir/$role.key"
     ext=$(mktemp); trap 'rm -f "${ext:?}"' EXIT
     printf 'basicConstraints=CA:FALSE\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=clientAuth\n' > "$ext"
-    openssl req -new -key "$dir/$role.key" -subj "/CN=$role" -out "$dir/$role.csr"
+    openssl req -new -sha256 -key "$dir/$role.key" -subj "/CN=$role" -out "$dir/$role.csr"
     openssl x509 -req -in "$dir/$role.csr" -CA "$dir/root.crt" -CAkey "$dir/root.key" -CAcreateserial -sha256 -days 825 \
       -extfile "$ext" -out "$dir/$role.crt"
     rm -f -- "$dir/$role.csr"
