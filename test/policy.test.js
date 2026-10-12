@@ -18,6 +18,10 @@ test('the writes the record names are allowed, by their exact routes', () => {
   assert.equal(d('git', 'POST', '/o/r.git/git-receive-pack'), true);
   assert.equal(d('anthropic', 'POST', '/v1/messages'), true);
   assert.equal(d('npm', 'GET', '/express/-/express-5.2.1.tgz'), true);
+  // npm's two advisory lookups are POSTs of the lockfile's names and versions: `npm ci` and `npm audit`
+  // (the first start through the gateway refused them, 2026-10-12 06:14)
+  assert.equal(d('npm', 'POST', '/-/npm/v1/security/advisories/bulk'), true);
+  assert.equal(d('npm', 'POST', '/-/npm/v1/security/audits/quick'), true);
 });
 
 test('everything else is refused: deletes, settings, other roles, other hosts', () => {
@@ -26,6 +30,8 @@ test('everything else is refused: deletes, settings, other roles, other hosts', 
   assert.equal(d('github', 'PUT', '/api/v3/repos/o/r/contents/x'), false);
   assert.equal(d('anthropic', 'GET', '/v1/pages/mcp'), false);
   assert.equal(d('npm', 'PUT', '/express'), false);
+  assert.equal(d('npm', 'POST', '/express'), false);
+  assert.equal(d('npm', 'POST', '/-/npm/v1/security/audits/full'), false);
   assert.equal(decide(c, 'nobody', 'github', 'GET', '/api/v3/user').allow, false);
   assert.equal(d('unknown', 'GET', '/'), false);
 });
