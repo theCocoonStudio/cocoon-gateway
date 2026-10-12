@@ -21,11 +21,12 @@ before(async () => {
 });
 after(() => upstream.close());
 
-const upstreams = { domain: 'gw.test', upstreams: { github: { host: 'api.github.com', credential: 'github_app', rewrite: { '^/api/v3(/.*)$': '$1' } }, arxiv: { host: 'arxiv.org', credential: null } } };
+const upstreams = { domain: 'gw.test', upstreams: { github: { host: 'api.github.com', credential: 'github_app', rewrite: { '^/api/v3(/.*)$': '$1' } }, arxiv: { host: 'arxiv.org', credential: null }, anthropic: { host: 'api.anthropic.com', credential: 'passthrough' } } };
 const policy = { roles: { claude: { cn: 'claude' } }, rules: [
   { role: 'claude', upstream: 'github', method: 'GET', path: '.*' },
   { role: 'claude', upstream: 'github', method: 'POST', path: '^(/api/v3)?/repos/[^/]+/[^/]+/pulls$' },
   { role: 'claude', upstream: 'arxiv', method: 'GET', path: '.*' },
+  { role: 'claude', upstream: 'anthropic', method: 'POST', path: '^/v1/messages$' },
 ] };
 const credentials = { async headersFor(kind) { return kind === 'github_app' ? { authorization: 'Bearer UPSTREAM-TOKEN' } : {}; } };
 const logs = [];
@@ -80,8 +81,19 @@ test('a streamed response arrives in order, untouched', async () => {
   assert.equal(r.data, 'data: one\n\ndata: two\n\n');
 });
 
-test('an upstream with no credential gets none, and the client credential still never passes', async () => {
-  await call({ method: 'GET', path: '/abs/1234.5678', headers: { host: 'arxiv.gw.test', 'x-test-role': 'claude', authorization: 'Bearer CLIENT-TOKEN' } });
+test('an upstream with no credential gets none, and neither the client credential nor the proxy one passes', async () => {
+  await call({ method: 'GET', path: '/abs/1234.5678', headers: { host: 'arxiv.gw.test', 'x-test-role': 'claude', authorization: 'Bearer CLIENT-TOKEN', 'proxy-authorization': 'Bearer ROLE-TOKEN', 'x-api-key': 'K' } });
   assert.equal(received.headers.authorization, undefined);
+  assert.equal(received.headers['proxy-authorization'], undefined);
+  assert.equal(received.headers['x-api-key'], undefined);
   assert.equal(received.headers.host, 'arxiv.org');
+});
+
+test('a passthrough upstream keeps the client\'s own credentials and still never the proxy one', async () => {
+  const r = await call({ method: 'POST', path: '/v1/messages', headers: { host: 'anthropic.gw.test', 'x-test-role': 'claude', authorization: 'Bearer OAUTH-OF-THE-OWNER', 'x-api-key': 'K', 'proxy-authorization': 'Bearer ROLE-TOKEN', 'content-type': 'application/json' } }, '{}');
+  assert.equal(r.status, 200);
+  assert.equal(received.headers.authorization, 'Bearer OAUTH-OF-THE-OWNER');
+  assert.equal(received.headers['x-api-key'], 'K');
+  assert.equal(received.headers['proxy-authorization'], undefined);
+  assert.equal(received.headers.host, 'api.anthropic.com');
 });
