@@ -25,3 +25,12 @@ test('the installation token is minted once and reused until five minutes before
   assert.equal(await source(), 'ghs_1');
   assert.equal(calls, 1);
 });
+
+test('a 200 whose payload carries no token string or no expires_at date is an error, not a cached undefined', async () => {
+  const payloads = [{}, { token: null, expires_at: '2026-01-01T00:00:00Z' }, { token: '', expires_at: '2026-01-01T00:00:00Z' }, { token: 'ghs_x' }, { token: 'ghs_x', expires_at: 'soon' }];
+  for (const payload of payloads) {
+    const fetchImpl = async () => ({ ok: true, json: async () => payload });
+    const source = githubAppTokenSource({ appId: '1', installationId: '2', privateKey: pem, fetchImpl });
+    await assert.rejects(source(), /credentials: installation token: the response carried no/);
+  }
+});

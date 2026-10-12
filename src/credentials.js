@@ -28,8 +28,13 @@ export function githubAppTokenSource({ appId, installationId, privateKey, fetchI
       headers: { authorization: `Bearer ${appJwt(appId, privateKey)}`, accept: 'application/vnd.github+json', 'user-agent': 'cocoon-gateway' },
     });
     if (!res.ok) throw new Error(`credentials: installation token: HTTP ${res.status}`);
+    // The 200 is not trusted to carry the fields: a token that is not a non-empty string, or an expires_at
+    // that is not a date, is an error here, never a cached `undefined` sent upstream as `token undefined`.
     const body = await res.json();
-    cached = { token: body.token, expiresAt: Date.parse(body.expires_at) };
+    if (typeof body?.token !== 'string' || body.token.length === 0) throw new Error('credentials: installation token: the response carried no token string');
+    const expiresAt = Date.parse(body.expires_at);
+    if (!Number.isFinite(expiresAt)) throw new Error('credentials: installation token: the response carried no expires_at date');
+    cached = { token: body.token, expiresAt };
     return cached.token;
   };
 }
