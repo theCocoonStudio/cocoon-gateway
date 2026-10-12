@@ -2,7 +2,7 @@
 # Deploys the gateway on a Droplet (or any Linux host with Docker), run there as root, once per release.
 # The host keeps no clone and no git: ONE reviewed tarball of this repository at the ref below is
 # downloaded over HTTPS from GitHub, its archive name checked against the commit, the image built from it,
-# and the container replaced. Secrets never enter the image or the container's environment: they are
+# the new container created beside the old, swapped in and waited for until healthy, the previous image removed. Secrets never enter the image or the container's environment: they are
 # files in SECRETS on the host, mounted read-only, and the env file names them (src/env.js reads
 # <NAME>_FILE). Nothing here is read from the environment; a change is a PR to this block.
 #
@@ -72,8 +72,14 @@ tar -xzf "$tmp/src.tgz" -C "$tmp"
 echo "deploy: $REPO@$REF is $sha"
 
 docker build -t "$IMAGE:$sha" -t "$IMAGE:latest" "$tmp/$top"
-docker rm -f "$NAME" >/dev/null 2>&1 || true
-docker run -d --name "$NAME" --restart unless-stopped \
+# The swap. The new container is created beside the old one first: a create binds no port, and a wrong
+# option (an unknown flag on an older Docker included) fails here while the old one still serves. Then
+# the old one goes, the new one takes its name and starts, and the deploy waits for its health check
+# before calling it done. The previous image is removed only then, so a failed start leaves it for the
+# rollback the message names; a second run of this script with the same ref removes nothing.
+previous=$(docker inspect -f '{{.Config.Image}}' "$NAME" 2>/dev/null || true)
+docker rm -f "$NAME-next" >/dev/null 2>&1 || true
+docker create --name "$NAME-next" --restart unless-stopped \
   --read-only --tmpfs /tmp \
   --cap-drop ALL --security-opt no-new-privileges \
   -p "$PORT:8443" -p "$RELAY_PORT:8443" \
@@ -81,7 +87,23 @@ docker run -d --name "$NAME" --restart unless-stopped \
   --env-file "$SECRETS/env" \
   --health-cmd 'node -e "fetch(\"http://127.0.0.1:8080/healthz\").then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"' \
   --health-interval 30s --health-timeout 5s --health-retries 3 \
-  "$IMAGE:$sha"
-sleep 3
-docker ps --filter "name=$NAME" --format 'deploy: {{.Names}} {{.Status}} {{.Ports}}'
+  --health-start-period 30s --health-start-interval 3s \
+  "$IMAGE:$sha" >/dev/null
+docker rm -f "$NAME" >/dev/null 2>&1 || true
+docker rename "$NAME-next" "$NAME"
+docker start "$NAME" >/dev/null
+state=unknown
+for _ in $(seq 1 20); do
+  state=$(docker inspect -f '{{.State.Health.Status}}' "$NAME" 2>/dev/null || echo unknown)
+  [ "$state" = healthy ] && break
+  sleep 3
+done
+docker ps --filter "name=^$NAME$" --format 'deploy: {{.Names}} {{.Status}} {{.Ports}}'
 docker logs "$NAME" 2>&1 | tail -3
+if [ "$state" != healthy ]; then
+  echo "deploy: $NAME is '$state' after 60 s; the previous image ${previous:-(none)} is kept: redeploy at the previous ref, or docker run it by hand" >&2
+  exit 1
+fi
+if [ -n "$previous" ] && [ "$previous" != "$IMAGE:$sha" ]; then
+  if docker image rm "$previous" >/dev/null 2>&1; then echo "deploy: previous image $previous removed"; else echo "deploy: previous image $previous kept (in use, or already gone)"; fi
+fi
