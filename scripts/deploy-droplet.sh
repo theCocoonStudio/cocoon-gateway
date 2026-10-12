@@ -44,15 +44,20 @@ for tool in "${TOOLS[@]}"; do
   command -v "$tool" >/dev/null || { echo "deploy: '$tool' is required" >&2; exit 1; }
 done
 [ "$(id -u)" = 0 ] || { echo "deploy: run as root (docker and $SECRETS)" >&2; exit 1; }
-[ -r "$SECRETS/env" ] || { echo "deploy: no $SECRETS/env; see the header" >&2; exit 1; }
-for f in app.pem server.key server.crt root.crt claude.token; do
+# The env file is in the loop with the secrets: the same owner check, since the header prescribes the
+# same chown for every file in SECRETS (the owner, 2026-10-11).
+for f in env app.pem server.key server.crt root.crt claude.token; do
   [ -r "$SECRETS/$f" ] || { echo "deploy: $SECRETS/$f is missing" >&2; exit 1; }
   [ "$(stat -c %u "$SECRETS/$f")" = 1000 ] || { echo "deploy: $SECRETS/$f must be owned by uid 1000 (the container's user)" >&2; exit 1; }
 done
 
 tmp=$(mktemp -d)
 trap 'rm -rf "${tmp:?}"' EXIT
-sha=$(curl -fsSL -H "Accept: application/vnd.github+json" "$API/$REPO/commits/$REF" | jq -r .sha)
+# A 200 is not trusted to carry a commit: the sha is taken only if it is a 40-digit hex string, and
+# checked again after the pipe (an empty answer would make the tarball URL the default branch's).
+sha=$(curl -fsSL -H "Accept: application/vnd.github+json" "$API/$REPO/commits/$REF" \
+      | jq -r 'if (.sha | type == "string" and test("^[0-9a-f]{40}$")) then .sha else error("no commit sha in the response") end')
+[[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "deploy: $REPO@$REF: the commit lookup did not return a commit sha" >&2; exit 1; }
 curl -fsSL "$API/$REPO/tarball/$sha" -o "$tmp/src.tgz"
 top=$(tar -tzf "$tmp/src.tgz" | awk -F/ 'NR == 1 { print $1 }')
 case "$sha" in "${top##*-}"*) ;; *) echo "deploy: archive $top does not match commit $sha" >&2; exit 1 ;; esac
