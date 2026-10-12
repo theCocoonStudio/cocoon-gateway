@@ -5,6 +5,10 @@
 # signed by it, and each side verifies the other against the root's public half alone. The root's KEY stays
 # where this script made it (the owner's machine); the gateway host gets server.key, server.crt and root.crt;
 # a sandbox host gets root.crt, <role>.key, <role>.crt and <role>.token. Refuses to overwrite anything.
+# Beside them appears root.srl: openssl's serial-number file, made by -CAcreateserial at the first signing
+# and incremented at each, so every certificate the root signs carries a distinct serial (two certificates
+# with one serial from one root are refused by some clients). Not a secret, not needed by any host, kept
+# with the root's key. The .csr requests are written and removed within the same step.
 #
 #   certs.sh root   <dir>                        root.key, root.crt      (10 years)
 #   certs.sh server <dir> <domain> <name>...     server.key, server.crt  for <name>.<domain> of every upstream
@@ -45,7 +49,7 @@ case "$cmd" in
     printf '[req]\ndistinguished_name=dn\n[dn]\n[v3_ca]\nbasicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign,cRLSign\nsubjectKeyIdentifier=hash\n' > "$ext"
     openssl req -x509 -new -key "$dir/root.key" -sha256 -days 3650 -subj "/CN=cocoon gateway root" \
       -config "$ext" -extensions v3_ca -out "$dir/root.crt"
-    echo "certs: root written: $dir/root.key (600, keep it here) and $dir/root.crt (public, goes everywhere)"
+    echo "certs: root written: $dir/root.key (600, keep it here) and $dir/root.crt (public, goes everywhere); root.srl, the serial counter, appears at the first signing and stays here too"
     ;;
   server)
     [ $# -ge 2 ] || usage
