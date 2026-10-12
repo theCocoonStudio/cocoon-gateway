@@ -5,8 +5,11 @@
 import http from 'node:http';
 import https from 'node:https';
 
-// Hop-by-hop headers (RFC 9110 §7.6.1) and the headers that would carry the client's own credentials.
-const DROP = new Set(['connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization', 'te', 'trailer', 'transfer-encoding', 'upgrade', 'host', 'authorization', 'x-api-key', 'cookie']);
+// Hop-by-hop headers (RFC 9110 §7.6.1), Host, cookies, and Proxy-Authorization, which carries the role's token
+// for this gateway and is consumed here. The client's own credentials (Authorization, x-api-key) are dropped
+// too, unless the upstream is `passthrough`: then they are the credential, and nothing is injected.
+const DROP = new Set(['connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization', 'te', 'trailer', 'transfer-encoding', 'upgrade', 'host', 'cookie']);
+const CLIENT_CREDENTIALS = new Set(['authorization', 'x-api-key']);
 
 export function rewritePath(path, rewrite) {
   if (!rewrite) return path;
@@ -26,9 +29,13 @@ export function rewriteLocation(location, hostToSubdomain) {
   return location;
 }
 
-export function proxy(req, res, { target, hostHeader, credentialHeaders, path, requestId, hostToSubdomain, onDone }) {
+export function proxy(req, res, { target, hostHeader, credentialHeaders, path, requestId, hostToSubdomain, onDone, passthrough = false }) {
   const headers = {};
-  for (const [k, v] of Object.entries(req.headers)) if (!DROP.has(k)) headers[k] = v;
+  for (const [k, v] of Object.entries(req.headers)) {
+    if (DROP.has(k)) continue;
+    if (!passthrough && CLIENT_CREDENTIALS.has(k)) continue;
+    headers[k] = v;
+  }
   Object.assign(headers, credentialHeaders, { host: hostHeader, 'x-request-id': requestId }); // the upstream's name, whatever address we connect to
   const client = target.scheme === 'http' ? http : https;
   const started = Date.now();

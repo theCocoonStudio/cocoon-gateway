@@ -1,13 +1,9 @@
-// Every credential is read from the environment of this process at start (DigitalOcean's secrets),
-// never from disk, never from the container. Each kind returns the headers to inject upstream.
+// Every credential is read at start from the environment of this process or from a file it names (the
+// platform's secrets or files mounted read-only; src/env.js), never from the container. Each kind returns
+// the headers to inject upstream; `passthrough` injects nothing and lets the client's own credential through
+// (the owner's subscription login for the model, which the container holds and the gateway does not).
 import { createSign } from 'node:crypto';
-
-const need = (name) => {
-  const v = process.env[name];
-  if (!v) throw new Error(`credentials: ${name} is not set`);
-  return v;
-};
-const pem = (name) => need(name).replace(/\\n/g, '\n'); // a PEM pasted into an env var carries \n
+import { secret } from './env.js';
 
 function base64url(buf) {
   return Buffer.from(buf).toString('base64').replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
@@ -38,20 +34,25 @@ export function githubAppTokenSource({ appId, installationId, privateKey, fetchI
   };
 }
 
-export function fromEnvironment() {
-  const github = githubAppTokenSource({
-    appId: need('GITHUB_APP_ID'),
-    installationId: need('GITHUB_APP_INSTALLATION_ID'),
-    privateKey: pem('GITHUB_APP_PRIVATE_KEY'),
-  });
-  const anthropicKey = process.env.ANTHROPIC_API_KEY;
-  const anthropicToken = process.env.ANTHROPIC_AUTH_TOKEN;
-  if (!anthropicKey && !anthropicToken) throw new Error('credentials: ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN is not set');
+// Only the kinds the upstreams table uses must be configured, checked once at start.
+export function fromEnvironment(upstreams = { upstreams: {} }) {
+  const kinds = new Set(Object.values(upstreams.upstreams).map((u) => u.credential).filter(Boolean));
+  const github = kinds.has('github_app') || kinds.has('github_app_basic')
+    ? githubAppTokenSource({
+        appId: secret('GITHUB_APP_ID', { required: true }),
+        installationId: secret('GITHUB_APP_INSTALLATION_ID', { required: true }),
+        privateKey: secret('GITHUB_APP_PRIVATE_KEY', { required: true }),
+      })
+    : null;
+  const anthropicKey = secret('ANTHROPIC_API_KEY');
+  const anthropicToken = secret('ANTHROPIC_AUTH_TOKEN');
+  if (kinds.has('anthropic') && !anthropicKey && !anthropicToken) throw new Error('credentials: ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN is not set');
   return {
     async headersFor(kind) {
       switch (kind) {
         case null:
         case undefined:
+        case 'passthrough':
           return {};
         case 'github_app':
           return { authorization: `Bearer ${await github()}` };

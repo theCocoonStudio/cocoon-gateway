@@ -34,7 +34,7 @@ export function createApp({ upstreams, policy, credentials, roleOf, log = (line)
     credentials.headersFor(upstream.credential).then(
       (credentialHeaders) =>
         proxy(req, res, {
-          target, hostHeader: upstream.host, credentialHeaders, path, requestId, hostToSubdomain,
+          target, hostHeader: upstream.host, credentialHeaders, path, requestId, hostToSubdomain, passthrough: upstream.credential === 'passthrough',
           onDone: ({ status, ms, bytes }) => log({ ts: new Date().toISOString(), id: requestId, role, upstream: key, method: req.method, path, status, ms, bytes, rule: verdict.rule }),
         }),
       (err) => finish(503, { error: 'credential', detail: err.message }, { role, upstream: key }),
@@ -43,14 +43,16 @@ export function createApp({ upstreams, policy, credentials, roleOf, log = (line)
   return app;
 }
 
-// The role is the client certificate's common name, and the bearer token must be that role's token.
+// The role is the client certificate's common name, and the token in Proxy-Authorization (the header a proxy
+// consumes, RFC 9110 §11.7.2; never forwarded) must be that role's token. Authorization stays the client's own,
+// so a passthrough upstream can receive it.
 export function roleFromCertificateAndToken(policy, tokens) {
   return function roleOf(req) {
     const cert = req.socket.getPeerCertificate && req.socket.getPeerCertificate();
     const cn = cert && cert.subject && cert.subject.CN;
     const role = cn && Object.entries(policy.roles).find(([, r]) => r.cn === cn)?.[0];
     if (!role) return null;
-    const presented = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    const presented = String(req.headers['proxy-authorization'] || '').replace(/^Bearer\s+/i, '');
     const expected = tokens[role] || '';
     if (!presented || presented.length !== expected.length) return null;
     return timingSafeEqual(Buffer.from(presented), Buffer.from(expected)) ? role : null;
