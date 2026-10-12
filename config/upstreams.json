@@ -3,7 +3,8 @@
   "upstreams": {
     "github":       { "host": "api.github.com",    "credential": "github_app",       "rewrite": { "^/api/v3(/.*)$": "$1", "^/api/graphql$": "/graphql" } },
     "git":          { "host": "github.com",        "credential": "github_app_basic" },
-    "anthropic":    { "host": "api.anthropic.com", "credential": "anthropic" },
+    "anthropic":    { "host": "api.anthropic.com", "credential": "passthrough" },
+    "npm":          { "host": "registry.npmjs.org", "credential": null },
     "arxiv":        { "host": "arxiv.org",         "credential": null },
     "export-arxiv": { "host": "export.arxiv.org",  "credential": null }
   }
