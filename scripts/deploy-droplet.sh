@@ -21,7 +21,7 @@
 #   ENV
 #   chown -R 1000:1000 /etc/cocoon-gateway && chmod 600 /etc/cocoon-gateway/*
 # The container runs as the image's `node` user, uid 1000, which is why the files are owned by that uid on
-# the host (an unused uid there). The Cloud Firewall in front admits 443 from the sandbox host's address only.
+# the host (an unused uid there). The Cloud Firewall in front admits 443 and 8443 from the sandbox host's address only.
 set -euo pipefail
 
 # --- Everything this script knows, in one place ---------------------------------------------
@@ -30,7 +30,9 @@ REF=main                         # the ref deployed; a tag once releases are cut
 IMAGE=cocoon-gateway
 NAME=cocoon-gateway
 SECRETS=/etc/cocoon-gateway      # the env file and the mounted files, owned by uid 1000, mode 600
-PORT=443                         # the host port; the container listens on 8443
+PORT=443                         # the host port for clients that present the client certificate themselves; the container listens on 8443
+RELAY_PORT=8443                  # the same listener published a second time, for the sandbox's in-container relay: inside the container
+                                 # port 443 to the gateway's address is redirected to the relay, so the relay dials a port that is not (8443)
 API=https://api.github.com/repos
 TOOLS=(
   curl    # the commit lookup and the tarball
@@ -62,7 +64,7 @@ docker rm -f "$NAME" >/dev/null 2>&1 || true
 docker run -d --name "$NAME" --restart unless-stopped \
   --read-only --tmpfs /tmp \
   --cap-drop ALL --security-opt no-new-privileges \
-  -p "$PORT:8443" \
+  -p "$PORT:8443" -p "$RELAY_PORT:8443" \
   -v "$SECRETS:/run/cocoon-gateway:ro" \
   --env-file "$SECRETS/env" \
   --health-cmd 'node -e "fetch(\"http://127.0.0.1:8080/healthz\").then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"' \
