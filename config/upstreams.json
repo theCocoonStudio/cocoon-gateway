@@ -1,5 +1,4 @@
 {
-  "domain": "gw.thecocoon.studio",
   "upstreams": {
     "github":       { "host": "api.github.com",    "credential": "github_app",       "rewrite": { "^/api/v3(/.*)$": "$1", "^/api/graphql$": "/graphql" } },
     "git":          { "host": "github.com",        "credential": "github_app_basic" },
