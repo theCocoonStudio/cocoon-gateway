@@ -31,7 +31,7 @@ usage() { sed -n '2,20p' "$0" >&2; exit 1; }
 [ $# -ge 2 ] || usage
 cmd=$1; dir=$2; shift 2
 mkdir -p -- "$dir"
-chmod 700 -- "$dir"
+chmod -- 700 "$dir"
 
 fresh() { # refuse to overwrite: a certificate replaced by accident is a trust change nobody reviewed
   for f in "$@"; do [ -e "$dir/$f" ] && { echo "certs: $dir/$f exists; remove it yourself first" >&2; exit 1; }; done
