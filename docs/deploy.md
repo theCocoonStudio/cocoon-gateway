@@ -1,70 +1,79 @@
 # Deploying the gateway: a new Droplet, and a redeploy
 
-The commands, in order, each one line to paste. Cocoon's values are filled in (the App id, the installation id, the box's paths); another installation changes them. Everything on the Droplet runs as root; everything on the box runs as the owner.
+Three machines, each holding only its own. **Your machine**: the root's key and serial file, the App's private key, and the start of every copy. **The box** (the sandbox host): the sandbox configuration, the launcher, and the four files its container mounts; it reaches nothing and nothing is copied from it. **The Droplet**: the gateway's six files and the container. Replace `DOMAIN` (the parent of the subdomains, e.g. `gw.example.com`), `IP` (the Droplet's address), `APP_ID`, `INSTALLATION_ID` (the number in the App's installation page URL) and `APP_KEY` (the path of the App's private key on your machine) with your values; none of them belongs in a repository.
 
-## 1. Once per installation: the certificates, on the box
+## 1. Once per installation: the certificates, on your machine
 
-Skip when `~/.config/cocoon/gateway/` already holds them (they are issued to the names, not to an address, so a new Droplet does not need new ones).
+Skip when they exist on your machine already: they are issued to the names, not to an address, so a new Droplet needs no new ones. If they were ever made on the box, make them again here and let the copies below replace the box's: the root's key belongs on no host it signs for.
 
 ```
-curl -fsSL https://raw.githubusercontent.com/theCocoonStudio/cocoon-gateway/main/scripts/certs.sh -o certs.sh && bash certs.sh root ~/.config/cocoon/gateway && bash certs.sh server ~/.config/cocoon/gateway gw.thecocoon.studio github git anthropic npm arxiv export-arxiv && bash certs.sh client ~/.config/cocoon/gateway claude
+curl -fsSL https://raw.githubusercontent.com/theCocoonStudio/cocoon-gateway/main/scripts/certs.sh -o certs.sh && bash certs.sh root ~/.config/cocoon/gateway && bash certs.sh server ~/.config/cocoon/gateway DOMAIN github git anthropic npm arxiv export-arxiv && bash certs.sh client ~/.config/cocoon/gateway claude
 ```
 
-Writes `root.key` (stays on the box), `root.crt`, `root.srl`, `server.key`, `server.crt`, `claude.key`, `claude.crt`, `claude.token`; keys at mode 600; refuses to overwrite.
+Writes, at mode 600 for the keys, refusing to overwrite: `root.key` and `root.srl` (stay here), `root.crt`, `server.key`, `server.crt`, `claude.key`, `claude.crt`, `claude.token`.
 
-## 2. The Droplet and its firewall, on DigitalOcean
+## 2. What goes where
 
-Create the Droplet: Debian 12 or 13, the smallest size, your ssh key. Note its public IP. A Cloud Firewall applied to it: inbound 22 from your address, 443 and 8443 from the sandbox host's public address, nothing else. 8443 is the same listener published for the sandbox's in-container relay, which cannot use 443 inside the container.
+| file | the box, `~/.config/cocoon/gateway/` | the Droplet, `/etc/cocoon-gateway/` |
+|---|---|---|
+| `root.crt` | yes | yes |
+| `claude.crt` | yes | no |
+| `claude.key` | yes | no |
+| `claude.token` | yes | yes |
+| `server.key` | no | yes |
+| `server.crt` | no | yes |
+| the App's private key | no (once the gateway shape is on) | yes, as `app.pem` |
+| `env` (step 5) | no | yes |
 
-## 3. The host, on the Droplet
+Copy them however your machine reaches each host; the box's directory is the one the sandbox configuration names.
+
+## 3. The Droplet and its firewall, on DigitalOcean
+
+Create the Droplet: Debian 12 or 13, the smallest size, your ssh key. Note its public IP. A Cloud Firewall applied to it: inbound 22 from your address, 443 and 8443 from the box's public address, nothing else. 8443 is the same listener published for the sandbox's in-container relay, which cannot use 443 inside the container.
+
+## 4. The host, on the Droplet, as root
 
 ```
 apt-get update && apt-get install -y docker.io jq && systemctl enable --now docker && mkdir -m 700 /etc/cocoon-gateway && docker --version
 ```
 
-## 4. The files, from the box
+Then the Droplet's files of step 2 into `/etc/cocoon-gateway/`.
 
-Replace `IP` with the Droplet's address. The App's private key becomes `app.pem`.
+## 5. The env file and the ownership, on the Droplet, as root
 
-```
-scp ~/.config/cocoon/gateway/server.key ~/.config/cocoon/gateway/server.crt ~/.config/cocoon/gateway/root.crt ~/.config/cocoon/gateway/claude.token root@IP:/etc/cocoon-gateway/ && scp ~/cocoon-claude.2026-09-03.private-key.pem root@IP:/etc/cocoon-gateway/app.pem
-```
-
-## 5. The env file and the ownership, on the Droplet
-
-The paths are the host's: the container sees `/etc/cocoon-gateway` at the same path, mounted read-only. The installation id is the number in the App's installation page URL.
+The paths are the host's: the container sees `/etc/cocoon-gateway` at the same path, mounted read-only.
 
 ```
-printf '%s\n' 'GITHUB_APP_ID=4819921' 'GITHUB_APP_INSTALLATION_ID=158823990' 'GITHUB_APP_PRIVATE_KEY_FILE=/etc/cocoon-gateway/app.pem' 'GATEWAY_TLS_KEY_FILE=/etc/cocoon-gateway/server.key' 'GATEWAY_TLS_CERT_FILE=/etc/cocoon-gateway/server.crt' 'GATEWAY_CLIENT_CA_FILE=/etc/cocoon-gateway/root.crt' 'GATEWAY_TOKEN_CLAUDE_FILE=/etc/cocoon-gateway/claude.token' > /etc/cocoon-gateway/env && chown -R 1000:1000 /etc/cocoon-gateway && chmod 600 /etc/cocoon-gateway/* && wc -l /etc/cocoon-gateway/app.pem && openssl rsa -check -noout -in /etc/cocoon-gateway/app.pem && ls -la /etc/cocoon-gateway
+printf '%s\n' 'GATEWAY_DOMAIN=DOMAIN' 'GITHUB_APP_ID=APP_ID' 'GITHUB_APP_INSTALLATION_ID=INSTALLATION_ID' 'GITHUB_APP_PRIVATE_KEY_FILE=/etc/cocoon-gateway/app.pem' 'GATEWAY_TLS_KEY_FILE=/etc/cocoon-gateway/server.key' 'GATEWAY_TLS_CERT_FILE=/etc/cocoon-gateway/server.crt' 'GATEWAY_CLIENT_CA_FILE=/etc/cocoon-gateway/root.crt' 'GATEWAY_TOKEN_CLAUDE_FILE=/etc/cocoon-gateway/claude.token' > /etc/cocoon-gateway/env && chown -R 1000:1000 /etc/cocoon-gateway && chmod 600 /etc/cocoon-gateway/* && wc -l /etc/cocoon-gateway/app.pem && openssl rsa -check -noout -in /etc/cocoon-gateway/app.pem && ls -la /etc/cocoon-gateway
 ```
 
-Expected: `27 /etc/cocoon-gateway/app.pem`, `RSA key ok`, six files owned `1000 1000` at `-rw-------` (env, app.pem, server.key, server.crt, root.crt, claude.token). A key that fails the check is a bad copy: copy it again with `scp`, never through a paste.
+Expected: `27 /etc/cocoon-gateway/app.pem`, `RSA key ok`, six files owned `1000 1000` at `-rw-------` (env, app.pem, server.key, server.crt, root.crt, claude.token). A key that fails the check is a bad copy: copy it again as a file, never through a paste.
 
-## 6. The deploy, on the Droplet
+## 6. The deploy, on the Droplet, as root
 
 ```
 curl -fsSL https://raw.githubusercontent.com/theCocoonStudio/cocoon-gateway/main/scripts/deploy-droplet.sh -o deploy-droplet.sh && bash deploy-droplet.sh
 ```
 
-The script checks its tools and the six files, downloads this repository's main as one tarball, checks the archive against the commit, builds the image, starts the container and waits for its health check. It prints the commit deployed, then `deploy: cocoon-gateway Up ... (healthy) 0.0.0.0:443->8443/tcp, 0.0.0.0:8443->8443/tcp` and the container's last log lines, which should end with `{"listening":8443,"domain":"gw.thecocoon.studio"}` and `{"health":8080}`.
+The script checks its tools and the six files, downloads this repository's main as one tarball, checks the archive against the commit, builds the image, starts the container and waits for its health check. It prints the commit deployed, then `deploy: cocoon-gateway Up ... (healthy) 0.0.0.0:443->8443/tcp, 0.0.0.0:8443->8443/tcp` and the container's last log lines, ending with `{"listening":8443,"domain":"DOMAIN"}` and `{"health":8080}`.
 
-## 7. The check from the box
+## 7. The check, from your machine
 
-Mutual TLS, the role's token, the policy and the App credential, end to end; replace `IP`:
+Mutual TLS, the role's token, the policy and the App credential, end to end, with the client files of step 1:
 
 ```
-curl -sS --cacert ~/.config/cocoon/gateway/root.crt --cert ~/.config/cocoon/gateway/claude.crt --key ~/.config/cocoon/gateway/claude.key -H "Proxy-Authorization: Bearer $(cat ~/.config/cocoon/gateway/claude.token)" --resolve github.gw.thecocoon.studio:8443:IP https://github.gw.thecocoon.studio:8443/api/v3/zen
+curl -sS --cacert ~/.config/cocoon/gateway/root.crt --cert ~/.config/cocoon/gateway/claude.crt --key ~/.config/cocoon/gateway/claude.key -H "Proxy-Authorization: Bearer $(cat ~/.config/cocoon/gateway/claude.token)" --resolve github.DOMAIN:8443:IP https://github.DOMAIN:8443/api/v3/zen
 ```
 
 Expected: one line of GitHub's zen. A 503 with `credential` in the body is the App key (step 5's check, then `docker restart cocoon-gateway`, since the key is read once at start); a handshake error is the certificates.
 
-## 8. The address, in the sandbox
+## 8. The sandbox, on the box
 
-The sandbox's gateway example (`examples/cocoon-ai-gateway.json` in cocoon-agent-sandbox) and the host file on the box (`~/.config/cocoon/sandbox.json`, `gateway.address`) carry the Droplet's address; a new Droplet is a one-value PR there and the same edit in the host file. Then `cocoon --dry`, then `cocoon claude`.
+The sandbox configuration (`~/.config/cocoon/sandbox.json`) gets the two gateway sections of the sandbox's `examples/cocoon-ai-gateway.json` with your `domain` and `address` in place of the documentation values. Then `cocoon --dry`, then `cocoon claude`. Once that start works, the App's private key can leave the box: nothing there reads it any more.
 
 ## Redeploying
 
-After a merge to main, on the Droplet:
+After a merge to main, on the Droplet, as root:
 
 ```
 curl -fsSL https://raw.githubusercontent.com/theCocoonStudio/cocoon-gateway/main/scripts/deploy-droplet.sh -o deploy-droplet.sh && bash deploy-droplet.sh
