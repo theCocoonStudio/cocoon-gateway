@@ -29,6 +29,8 @@ npm run audit  # the scheduled dependency check: npm audit at or above "moderate
 
 ## Deploying: a Droplet behind a Cloud Firewall
 
+The commands, in order and one line each, are in [docs/deploy.md](docs/deploy.md): a new Droplet from nothing, the check from the box, the redeploy, and how to read the log.
+
 The shape that keeps the client certificate: the gateway terminates TLS itself, so DigitalOcean's edge is not in the way (App Platform terminates TLS at its edge and no client certificate reaches the container; it also has no inbound address filter). In order:
 
 1. **Certificates, on the owner's machine:** `scripts/certs.sh root <dir>`, then `scripts/certs.sh server <dir> <domain> github git anthropic npm arxiv export-arxiv` (the keys of `config/upstreams.json`), then `scripts/certs.sh client <dir> claude` for each role. The root's key stays there, and so does `root.srl`, which appears beside it at the first signing: openssl's serial counter (`-CAcreateserial`), one number per certificate the root signs, not a secret and not copied anywhere. The gateway host gets `server.key`, `server.crt`, `root.crt` and each role's `.token`; each sandbox host gets `root.crt` and its role's `.key`, `.crt` and `.token`.
