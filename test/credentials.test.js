@@ -8,11 +8,11 @@ const pem = privateKey.export({ type: 'pkcs1', format: 'pem' });
 
 test('the App JWT is RS256 over header.payload with iss, iat 60 s back and exp 9 minutes ahead', () => {
   const now = 1_700_000_000;
-  const jwt = appJwt('4819921', pem, now);
+  const jwt = appJwt('100001', pem, now);
   const [h, p, s] = jwt.split('.');
   const dec = (x) => JSON.parse(Buffer.from(x.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString());
   assert.deepEqual(dec(h), { alg: 'RS256', typ: 'JWT' });
-  assert.deepEqual(dec(p), { iat: now - 60, exp: now + 540, iss: '4819921' });
+  assert.deepEqual(dec(p), { iat: now - 60, exp: now + 540, iss: '100001' });
   const v = createVerify('RSA-SHA256'); v.update(`${h}.${p}`);
   assert.equal(v.verify(publicKey, Buffer.from(s.replace(/-/g, '+').replace(/_/g, '/'), 'base64')), true);
 });
