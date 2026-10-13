@@ -23,7 +23,7 @@ Credentials are read once at start from the process environment, or from files t
 ```
 npm ci --ignore-scripts
 npm run check  # ShellCheck over scripts/, the tests, the dependency audit
-npm start      # PORT (8443), HEALTH_PORT (8080, loopback), GATEWAY_TLS_KEY, GATEWAY_TLS_CERT, GATEWAY_CLIENT_CA, GITHUB_APP_*, GATEWAY_TOKEN_* from the environment or the files it names
+npm start      # PORT (8443), HEALTH_PORT (8080, loopback), GATEWAY_DOMAIN, GATEWAY_TLS_KEY, GATEWAY_TLS_CERT, GATEWAY_CLIENT_CA, GITHUB_APP_*, GATEWAY_TOKEN_* from the environment or the files it names
 npm run audit  # the scheduled dependency check: npm audit at or above "moderate" fails
 ```
 

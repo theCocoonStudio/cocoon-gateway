@@ -97,3 +97,7 @@ test('a passthrough upstream keeps the client\'s own credentials and still never
   assert.equal(received.headers['proxy-authorization'], undefined);
   assert.equal(received.headers.host, 'api.anthropic.com');
 });
+
+test('the app refuses to start without a domain: the repository carries none, the environment supplies it', () => {
+  assert.throws(() => createApp({ upstreams: { upstreams: upstreams.upstreams }, policy, credentials, roleOf: () => 'claude' }), /upstreams.domain is required/);
+});

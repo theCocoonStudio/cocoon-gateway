@@ -12,6 +12,7 @@
 #   # from the owner's machine (scripts/certs.sh): server.key, server.crt, root.crt; the App's private key
 #   # as app.pem; one <role>.token per role; then:
 #   cat > /etc/cocoon-gateway/env <<'ENV'
+#   GATEWAY_DOMAIN=<the parent of the gateway's subdomains, e.g. gw.example.com>
 #   GITHUB_APP_ID=<the App's id>
 #   GITHUB_APP_INSTALLATION_ID=<its installation id on the account: the number in the App's installation page URL>
 #   GITHUB_APP_PRIVATE_KEY_FILE=/etc/cocoon-gateway/app.pem

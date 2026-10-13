@@ -7,6 +7,7 @@ import { proxy, rewritePath } from './proxy.js';
 export function createApp({ upstreams, policy, credentials, roleOf, log = (line) => console.log(JSON.stringify(line)), targetOf }) {
   const compiled = compile(policy);
   const domain = upstreams.domain;
+  if (typeof domain !== 'string' || !domain) throw new Error('createApp: upstreams.domain is required (the gateway reads GATEWAY_DOMAIN from its environment; the repository carries no domain)');
   const hostToSubdomain = Object.entries(upstreams.upstreams).map(([key, u]) => [u.host, `${key}.${domain}`]);
   const app = express();
   app.disable('x-powered-by');

@@ -7,7 +7,9 @@ import { fromEnvironment } from './credentials.js';
 import { secret } from './env.js';
 
 const read = (p) => JSON.parse(fs.readFileSync(new URL(p, import.meta.url), 'utf8'));
-const upstreams = read('../config/upstreams.json');
+// The gateway's domain is deployment configuration, not repository content: GATEWAY_DOMAIN in the environment
+// (or the file it names), never a value in config/upstreams.json.
+const upstreams = { ...read('../config/upstreams.json'), domain: secret('GATEWAY_DOMAIN', { required: true }) };
 const policy = read('../config/policy.json');
 const tokens = Object.fromEntries(Object.keys(policy.roles).map((role) => [role, secret(`GATEWAY_TOKEN_${role.toUpperCase()}`, { required: true })]));
 
