@@ -7,10 +7,10 @@ Three machines, each holding only its own. **Your machine**: the root's key and 
 Skip when they exist on your machine already: they are issued to the names, not to an address, so a new Droplet needs no new ones. If they were ever made on the box, make them again here and let the copies below replace the box's: the root's key belongs on no host it signs for.
 
 ```
-curl -fsSL https://raw.githubusercontent.com/theCocoonStudio/cocoon-gateway/main/scripts/certs.sh -o certs.sh && bash certs.sh root ~/.config/cocoon/gateway && bash certs.sh server ~/.config/cocoon/gateway DOMAIN github git anthropic npm arxiv export-arxiv && bash certs.sh client ~/.config/cocoon/gateway claude
+curl -fsSL https://raw.githubusercontent.com/theCocoonStudio/cocoon-gateway/main/scripts/certs.sh -o certs.sh && bash certs.sh root ~/.config/cocoon/gateway && bash certs.sh server ~/.config/cocoon/gateway DOMAIN github git anthropic npm arxiv export-arxiv && bash certs.sh client ~/.config/cocoon/gateway claude && bash certs.sh client ~/.config/cocoon/gateway gemini
 ```
 
-Writes, at mode 600 for the keys, refusing to overwrite: `root.key` and `root.srl` (stay here), `root.crt`, `server.key`, `server.crt`, `claude.key`, `claude.crt`, `claude.token`.
+Writes, at mode 600 for the keys, refusing to overwrite: `root.key` and `root.srl` (stay here), `root.crt`, `server.key`, `server.crt`, `claude.key`, `claude.crt`, `claude.token`, `gemini.key`, `gemini.crt`, `gemini.token` (one client set per role in `config/policy.json`).
 
 ## 2. What goes where
 
@@ -20,6 +20,9 @@ Writes, at mode 600 for the keys, refusing to overwrite: `root.key` and `root.sr
 | `claude.crt` | yes | no |
 | `claude.key` | yes | no |
 | `claude.token` | yes | yes |
+| `gemini.crt` | yes | no |
+| `gemini.key` | yes | no |
+| `gemini.token` | yes | yes |
 | `server.key` | no | yes |
 | `server.crt` | no | yes |
 | the App's private key | no (once the gateway shape is on) | yes, as `app.pem` |
@@ -44,10 +47,10 @@ Then the Droplet's files of step 2 into `/etc/cocoon-gateway/`.
 The paths are the host's: the container sees `/etc/cocoon-gateway` at the same path, mounted read-only.
 
 ```
-printf '%s\n' 'GATEWAY_DOMAIN=DOMAIN' 'GITHUB_APP_ID=APP_ID' 'GITHUB_APP_INSTALLATION_ID=INSTALLATION_ID' 'GITHUB_APP_PRIVATE_KEY_FILE=/etc/cocoon-gateway/app.pem' 'GATEWAY_TLS_KEY_FILE=/etc/cocoon-gateway/server.key' 'GATEWAY_TLS_CERT_FILE=/etc/cocoon-gateway/server.crt' 'GATEWAY_CLIENT_CA_FILE=/etc/cocoon-gateway/root.crt' 'GATEWAY_TOKEN_CLAUDE_FILE=/etc/cocoon-gateway/claude.token' > /etc/cocoon-gateway/env && chown -R 1000:1000 /etc/cocoon-gateway && chmod 600 /etc/cocoon-gateway/* && wc -l /etc/cocoon-gateway/app.pem && openssl rsa -check -noout -in /etc/cocoon-gateway/app.pem && ls -la /etc/cocoon-gateway
+printf '%s\n' 'GATEWAY_DOMAIN=DOMAIN' 'GITHUB_APP_ID=APP_ID' 'GITHUB_APP_INSTALLATION_ID=INSTALLATION_ID' 'GITHUB_APP_PRIVATE_KEY_FILE=/etc/cocoon-gateway/app.pem' 'GATEWAY_TLS_KEY_FILE=/etc/cocoon-gateway/server.key' 'GATEWAY_TLS_CERT_FILE=/etc/cocoon-gateway/server.crt' 'GATEWAY_CLIENT_CA_FILE=/etc/cocoon-gateway/root.crt' 'GATEWAY_TOKEN_CLAUDE_FILE=/etc/cocoon-gateway/claude.token' 'GATEWAY_TOKEN_GEMINI_FILE=/etc/cocoon-gateway/gemini.token' > /etc/cocoon-gateway/env && chown -R 1000:1000 /etc/cocoon-gateway && chmod 600 /etc/cocoon-gateway/* && wc -l /etc/cocoon-gateway/app.pem && openssl rsa -check -noout -in /etc/cocoon-gateway/app.pem && ls -la /etc/cocoon-gateway
 ```
 
-Expected: `27 /etc/cocoon-gateway/app.pem`, `RSA key ok`, six files owned `1000 1000` at `-rw-------` (env, app.pem, server.key, server.crt, root.crt, claude.token). A key that fails the check is a bad copy: copy it again as a file, never through a paste.
+Expected: `27 /etc/cocoon-gateway/app.pem`, `RSA key ok`, seven files owned `1000 1000` at `-rw-------` (env, app.pem, server.key, server.crt, root.crt, claude.token, gemini.token). A key that fails the check is a bad copy: copy it again as a file, never through a paste.
 
 ## 6. The deploy, on the Droplet, as root
 
@@ -55,7 +58,7 @@ Expected: `27 /etc/cocoon-gateway/app.pem`, `RSA key ok`, six files owned `1000 
 curl -fsSL https://raw.githubusercontent.com/theCocoonStudio/cocoon-gateway/main/scripts/deploy-droplet.sh -o deploy-droplet.sh && bash deploy-droplet.sh
 ```
 
-The script checks its tools and the six files, downloads this repository's main as one tarball, checks the archive against the commit, builds the image, starts the container and waits for its health check. It prints the commit deployed, then `deploy: cocoon-gateway Up ... (healthy) 0.0.0.0:443->8443/tcp, 0.0.0.0:8443->8443/tcp` and the container's last log lines, ending with `{"listening":8443,"domain":"DOMAIN"}` and `{"health":8080}`.
+The script checks its tools and the seven files, downloads this repository's main as one tarball, checks the archive against the commit, builds the image, starts the container and waits for its health check. It prints the commit deployed, then `deploy: cocoon-gateway Up ... (healthy) 0.0.0.0:443->8443/tcp, 0.0.0.0:8443->8443/tcp` and the container's last log lines, ending with `{"listening":8443,"domain":"DOMAIN"}` and `{"health":8080}`.
 
 ## 7. The check, from your machine
 
@@ -73,7 +76,7 @@ The sandbox configuration (`~/.config/cocoon/sandbox.json`) gets the two gateway
 
 ## Redeploying
 
-After a merge to main, on the Droplet, as root:
+After a merge to main, on the Droplet, as root. A role added to `config/policy.json` needs its token file in `/etc/cocoon-gateway/` and its `GATEWAY_TOKEN_<ROLE>_FILE` line in `env` first: the server refuses to start without every role's token, and the deploy's file check names the missing file (gemini joined claude on 2026-10-14).
 
 ```
 curl -fsSL https://raw.githubusercontent.com/theCocoonStudio/cocoon-gateway/main/scripts/deploy-droplet.sh -o deploy-droplet.sh && bash deploy-droplet.sh
