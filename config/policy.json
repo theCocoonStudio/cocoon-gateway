@@ -1,6 +1,7 @@
 {
   "roles": {
-    "claude": { "cn": "claude" }
+    "claude": { "cn": "claude" },
+    "gemini": { "cn": "gemini" }
   },
   "rules": [
     { "role": "claude", "upstream": "github",    "method": "GET",   "path": "^(/api/v3)?/.*" },
@@ -16,6 +17,20 @@
     { "role": "claude", "upstream": "npm",          "method": "GET", "path": ".*" },
     { "role": "claude", "upstream": "npm",          "method": "POST", "path": "^/-/npm/v1/security/(advisories/bulk|audits/quick)$" },
     { "role": "claude", "upstream": "arxiv",        "method": "GET", "path": ".*" },
-    { "role": "claude", "upstream": "export-arxiv", "method": "GET", "path": ".*" }
+    { "role": "claude", "upstream": "export-arxiv", "method": "GET", "path": ".*" },
+    { "role": "gemini", "upstream": "github",    "method": "GET",   "path": "^(/api/v3)?/.*" },
+    { "role": "gemini", "upstream": "github",    "method": "POST",  "path": "^(/api/v3)?/repos/[^/]+/[^/]+/(pulls|issues)$" },
+    { "role": "gemini", "upstream": "github",    "method": "POST",  "path": "^(/api/v3)?/repos/[^/]+/[^/]+/(pulls|issues)/[0-9]+/(reviews|comments)$" },
+    { "role": "gemini", "upstream": "github",    "method": "PATCH", "path": "^(/api/v3)?/repos/[^/]+/[^/]+/pulls/[0-9]+$" },
+    { "role": "gemini", "upstream": "github",    "method": "PUT",   "path": "^(/api/v3)?/repos/[^/]+/[^/]+/pulls/[0-9]+/(merge|update-branch)$" },
+    { "role": "gemini", "upstream": "github",    "method": "POST",  "path": "^(/api/graphql|/graphql)$" },
+    { "role": "gemini", "upstream": "git",       "method": "GET",   "path": "^/[^/]+/[^/]+(\\.git)?/info/refs$" },
+    { "role": "gemini", "upstream": "git",       "method": "POST",  "path": "^/[^/]+/[^/]+(\\.git)?/git-(upload|receive)-pack$" },
+    { "role": "gemini", "upstream": "anthropic", "method": "POST",  "path": "^/v1/messages(/count_tokens)?$" },
+    { "role": "gemini", "upstream": "anthropic", "method": "GET",   "path": "^/v1/models.*" },
+    { "role": "gemini", "upstream": "npm",          "method": "GET", "path": ".*" },
+    { "role": "gemini", "upstream": "npm",          "method": "POST", "path": "^/-/npm/v1/security/(advisories/bulk|audits/quick)$" },
+    { "role": "gemini", "upstream": "arxiv",        "method": "GET", "path": ".*" },
+    { "role": "gemini", "upstream": "export-arxiv", "method": "GET", "path": ".*" }
   ]
 }

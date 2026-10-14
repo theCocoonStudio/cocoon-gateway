@@ -42,3 +42,16 @@ test('first match wins and a deny rule denies', () => {
   assert.equal(decide(cc, 'r', 'u', 'GET', '/secret/x').allow, false);
   assert.equal(decide(cc, 'r', 'u', 'GET', '/open').allow, true);
 });
+
+test('gemini holds the same rule set as claude, rule for rule (the owner, 2026-10-14: the same set unless one is revoked)', () => {
+  const shape = (r) => JSON.stringify({ upstream: r.upstream, method: r.method, path: r.path, effect: r.effect ?? 'allow' });
+  const rulesOf = (role) => policy.rules.filter((r) => r.role === role).map(shape);
+  assert.ok(rulesOf('claude').length >= 14);
+  assert.deepEqual(rulesOf('gemini'), rulesOf('claude'));
+  assert.deepEqual(Object.keys(policy.roles), ['claude', 'gemini']);
+  const g = (u, m, p) => decide(c, 'gemini', u, m, p).allow;
+  assert.equal(g('github', 'POST', '/api/v3/repos/o/r/pulls'), true);
+  assert.equal(g('git', 'POST', '/o/r.git/git-receive-pack'), true);
+  assert.equal(g('github', 'DELETE', '/api/v3/repos/o/r'), false);
+  assert.equal(g('github', 'PATCH', '/api/v3/repos/o/r'), false);
+});

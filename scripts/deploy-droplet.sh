@@ -20,6 +20,7 @@
 #   GATEWAY_TLS_CERT_FILE=/etc/cocoon-gateway/server.crt
 #   GATEWAY_CLIENT_CA_FILE=/etc/cocoon-gateway/root.crt
 #   GATEWAY_TOKEN_CLAUDE_FILE=/etc/cocoon-gateway/claude.token
+#   GATEWAY_TOKEN_GEMINI_FILE=/etc/cocoon-gateway/gemini.token
 #   ENV
 #   chown -R 1000:1000 /etc/cocoon-gateway && chmod 600 /etc/cocoon-gateway/*
 # The container runs as the image's `node` user, uid 1000, which is why the files are owned by that uid on
@@ -49,7 +50,7 @@ done
 [ "$(id -u)" = 0 ] || { echo "deploy: run as root (docker and $SECRETS)" >&2; exit 1; }
 # The env file is in the loop with the secrets: the same owner check, since the header prescribes the
 # same chown for every file in SECRETS (the owner, 2026-10-11).
-for f in env app.pem server.key server.crt root.crt claude.token; do
+for f in env app.pem server.key server.crt root.crt claude.token gemini.token; do   # one <role>.token per role in config/policy.json; the server refuses to start without each
   [ -r "$SECRETS/$f" ] || { echo "deploy: $SECRETS/$f is missing" >&2; exit 1; }
   [ "$(stat -c %u "$SECRETS/$f")" = 1000 ] || { echo "deploy: $SECRETS/$f must be owned by uid 1000 (the container's user)" >&2; exit 1; }
 done
