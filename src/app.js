@@ -1,10 +1,12 @@
-// The Express app: identify the role, route by Host, decide by the policy table, proxy, log one line.
+// The Express app: identify the role, route by Host, decide by the policy table, proxy, log one line. Every line
+// goes to `log` (the server's: stdout and the database sink); `accept` is the sink's word on whether a line can
+// still be kept: when it cannot, the request is refused before anything else (no log, no request).
 import express from 'express';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { compile, decide } from './policy.js';
 import { proxy, rewritePath } from './proxy.js';
 
-export function createApp({ upstreams, policy, credentials, roleOf, log = (line) => console.log(JSON.stringify(line)), targetOf }) {
+export function createApp({ upstreams, policy, credentials, roleOf, log = (line) => console.log(JSON.stringify(line)), targetOf, accept = () => true }) {
   const compiled = compile(policy);
   const domain = upstreams.domain;
   if (typeof domain !== 'string' || !domain) throw new Error('createApp: upstreams.domain is required (the gateway reads GATEWAY_DOMAIN from its environment; the repository carries no domain)');
@@ -21,10 +23,12 @@ export function createApp({ upstreams, policy, credentials, roleOf, log = (line)
     const suffix = `.${domain}`;
     const key = host.endsWith(suffix) ? host.slice(0, -suffix.length) : null;
     const upstream = key && upstreams.upstreams[key];
+    const peer = (req.socket && req.socket.remoteAddress) || null;
     const finish = (status, body, extra = {}) => {
       res.status(status).set('x-request-id', requestId).json({ ...body, requestId });
-      log({ ts: new Date().toISOString(), id: requestId, host, method: req.method, path: req.originalUrl, status, ...extra });
+      log({ ts: new Date().toISOString(), id: requestId, kind: body.error, host, method: req.method, path: req.originalUrl, status, detail: body.detail, peer, ...extra });
     };
+    if (!accept()) return finish(503, { error: 'log', detail: 'the request log is not accepting lines; no log, no request' });
     if (!upstream) return finish(421, { error: 'misdirected', detail: 'this gateway does not serve that host' });
     const role = roleOf(req);
     if (!role) return finish(401, { error: 'unauthenticated' });
@@ -36,7 +40,7 @@ export function createApp({ upstreams, policy, credentials, roleOf, log = (line)
       (credentialHeaders) =>
         proxy(req, res, {
           target, hostHeader: upstream.host, credentialHeaders, path, requestId, hostToSubdomain, passthrough: upstream.credential === 'passthrough',
-          onDone: ({ status, ms, bytes }) => log({ ts: new Date().toISOString(), id: requestId, role, upstream: key, method: req.method, path, status, ms, bytes, rule: verdict.rule }),
+          onDone: ({ status, ms, bytes }) => log({ ts: new Date().toISOString(), id: requestId, role, upstream: key, method: req.method, path, status, ms, bytes, rule: verdict.rule, peer }),
         }),
       (err) => finish(503, { error: 'credential', detail: err.message }, { role, upstream: key }),
     );

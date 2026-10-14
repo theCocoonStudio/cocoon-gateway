@@ -10,7 +10,13 @@ Settled with the owner on 2026-10-11; the sandbox it serves is [cocoon-agent-san
 2. The gateway routes by the **Host** header: one subdomain per upstream (`github.`, `git.`, `anthropic.`, `arxiv.`, ...). A Host it does not serve is answered 421 and never proxied; it is not an open proxy.
 3. The **policy table** (`config/policy.json`) decides: rules of role, upstream, method and path pattern, first match wins, a final deny. Nothing lists a DELETE, so none passes. Roles today: `claude` and `gemini`, with the same rule set (the owner, 2026-10-14); a revocation for one is a rule removed from its copy.
 4. The request is **proxied as a stream**: the body piped up and the response piped back byte for byte, so git's packs and the model's event streams survive. The client's own credentials never go up and the upstream's credential is injected here, except on a `passthrough` upstream (the model API: the owner's Claude Code runs on the subscription login, so the container's own token goes through and the gateway holds no model credential); Host is rewritten to the upstream's name; a request id is stamped and returned; Location headers in responses are rewritten back to the gateway's subdomains so a redirect stays inside the wall.
-5. One **log line** per request: time, id, role, upstream, method, path, status, duration, bytes, the rule that allowed it.
+5. One **log line** per request: time, id, role, upstream, method, path, status, duration, bytes, the rule that allowed it, the peer. Every line is a row in the **backend database** (`src/sink.js`, below); stdout keeps a copy for the container's lifetime only.
+
+## The request log
+
+The log lives in the backend database and nowhere on the Droplet or the sandbox host (the owner, 2026-10-13): a machine's own record of itself is not a record, since whatever reaches the host reaches its log, and the agent that wrote this deploy holds the best map of the Droplet. In the database the gateway's credential inserts and never deletes (`db/schema.sql`: INSERT on `requests` and `refusals`, nothing else), the owner reads from their own machine, the agent does neither. What the author of the gateway would need to get at the record is the owner's credential, which exists on no machine the author can reach.
+
+The sink (`src/sink.js`) is a bounded write-behind queue: lines are inserted in batches, at a hundred lines or after a second; a failed insert keeps its lines in order and retries with a doubling delay capped at thirty seconds; a full queue stops accepting and the gateway answers every request 503 `log` until it drains: no log, no request (the owner may strike this for drop-and-count). The database is required at start: the probe fails, the gateway does not serve, the deploy keeps the previous image. The connection is pinned to the database's CA (`src/database.js`): pg lets a URL's `sslmode=require` replace the ssl option beside it, so the parameter is stripped and the CA file is the one setting. The loopback `/healthz` reports the sink's state; `docker stop` flushes the queue before the process ends.
 
 ## Upstreams and credentials
 
@@ -23,7 +29,7 @@ Credentials are read once at start from the process environment, or from files t
 ```
 npm ci --ignore-scripts
 npm run check  # ShellCheck over scripts/, the tests, the dependency audit
-npm start      # PORT (8443), HEALTH_PORT (8080, loopback), GATEWAY_DOMAIN, GATEWAY_TLS_KEY, GATEWAY_TLS_CERT, GATEWAY_CLIENT_CA, GITHUB_APP_*, GATEWAY_TOKEN_* from the environment or the files it names
+npm start      # PORT (8443), HEALTH_PORT (8080, loopback), GATEWAY_DOMAIN, GATEWAY_TLS_KEY, GATEWAY_TLS_CERT, GATEWAY_CLIENT_CA, GITHUB_APP_*, GATEWAY_TOKEN_*, GATEWAY_DATABASE_URL, GATEWAY_DATABASE_CA from the environment or the files it names
 npm run audit  # the scheduled dependency check: npm audit at or above "moderate" fails
 ```
 
@@ -52,9 +58,12 @@ The shape that keeps the client certificate: the gateway terminates TLS itself, 
 - `src/credentials.js`: the App JWT, the installation token source, the headers per credential kind.
 - `src/proxy.js`: the streaming pass-through, the path and Location rewrites.
 - `src/app.js`: the Express app and the role from the certificate and token.
-- `src/server.js`: the mutual-TLS server.
+- `src/sink.js`: the request log's sink, the bounded write-behind queue into the database.
+- `src/database.js`: the database connection from the two secrets, the CA pinned.
+- `src/server.js`: the mutual-TLS server, the sink wired to the log, the start probe.
 - `config/`: upstreams and the policy table, the two files that are the whole configuration.
-- `test/`: policy decisions, the proxy against a fake upstream, the credentials.
+- `db/schema.sql`: the two tables and the insert-only grant, applied once by the owner.
+- `test/`: policy decisions, the proxy against a fake upstream, the credentials, the sink against a fake database, the connection's CA pin against pg itself.
 - `scripts/audit.sh`: the dependency check for a cron.
 - `scripts/certs.sh`: the private root, the server certificate, a client certificate and token per role.
 - `scripts/deploy-droplet.sh`: the deploy on a Droplet, run there as root.
@@ -62,4 +71,4 @@ The shape that keeps the client certificate: the gateway terminates TLS itself, 
 
 ## Not in the first slice
 
-A ref-level policy on git pushes; the per-upstream rate limits; more roles (the backend instance of the agent, the site's own); the records endpoint. Each is a rule or a subdomain, not a redesign.
+A ref-level policy on git pushes; the per-upstream rate limits; more roles (the backend instance of the agent, the site's own); the records endpoint; the daily digest read from the log's tables into the records repository. Each is a rule, a subdomain or a reader, not a redesign.

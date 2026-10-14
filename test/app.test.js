@@ -30,7 +30,8 @@ const policy = { roles: { claude: { cn: 'claude' } }, rules: [
 ] };
 const credentials = { async headersFor(kind) { return kind === 'github_app' ? { authorization: 'Bearer UPSTREAM-TOKEN' } : {}; } };
 const logs = [];
-const app = createApp({ upstreams, policy, credentials, roleOf: (req) => req.headers['x-test-role'] || null, log: (l) => logs.push(l), targetOf: () => ({ host: '127.0.0.1', port: upstreamPort, scheme: 'http' }) });
+let accepting = true;
+const app = createApp({ upstreams, policy, credentials, roleOf: (req) => req.headers['x-test-role'] || null, log: (l) => logs.push(l), targetOf: () => ({ host: '127.0.0.1', port: upstreamPort, scheme: 'http' }), accept: () => accepting });
 
 let server, port;
 before(async () => { server = http.createServer(app); await new Promise((r) => server.listen(0, '127.0.0.1', r)); port = server.address().port; });
@@ -53,6 +54,19 @@ test('no role: unauthenticated; a role with no rule: refused by policy, with the
   const r = await call({ method: 'DELETE', path: '/api/v3/repos/o/r', headers: { host: 'github.gw.test', 'x-test-role': 'claude' } });
   assert.equal(r.status, 403);
   assert.ok(JSON.parse(r.data).requestId);
+  const line = logs.find((l) => l.id === JSON.parse(r.data).requestId);
+  assert.deepEqual([line.kind, line.status, line.role, line.upstream, line.peer], ['policy', 403, 'claude', 'github', '127.0.0.1'], 'a refusal line names its kind, the role and the peer');
+});
+
+test('when the log cannot keep a line, every request is refused first with a 503 that says so: no log, no request', async () => {
+  accepting = false;
+  try {
+    const r = await call({ method: 'GET', path: '/api/v3/zen', headers: { host: 'github.gw.test', 'x-test-role': 'claude' } });
+    assert.equal(r.status, 503);
+    assert.equal(JSON.parse(r.data).error, 'log');
+    const line = logs.find((l) => l.id === JSON.parse(r.data).requestId);
+    assert.equal(line.kind, 'log', 'the refusal is still offered to the log, which counts it if it cannot keep it');
+  } finally { accepting = true; }
 });
 
 test('an allowed request is proxied: Host rewritten, the client credential dropped, the upstream one injected, the path rewritten, the id stamped', async () => {
@@ -67,6 +81,8 @@ test('an allowed request is proxied: Host rewritten, the client credential dropp
   assert.equal(JSON.parse(r.data).echo, '{"title":"t"}');
   const line = logs.find((l) => l.id === r.headers['x-request-id'] && l.status === 200);
   assert.ok(line && line.role === 'claude' && line.upstream === 'github');
+  assert.equal(line.peer, '127.0.0.1', 'the proxied line carries the client address');
+  assert.equal(typeof line.ms, 'number');
 });
 
 test('a redirect to the upstream host comes back pointing at the gateway subdomain', async () => {
