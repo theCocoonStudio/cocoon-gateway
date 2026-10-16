@@ -76,13 +76,13 @@ The sandbox configuration (`~/.config/cocoon/sandbox.json`) gets the two gateway
 
 ## Redeploying
 
-After a merge to main, on the Droplet, as root. A role added to `config/policy.json` needs its token file in `/etc/cocoon-gateway/` and its `GATEWAY_TOKEN_<ROLE>_FILE` line in `env` first: the server refuses to start without every role's token, and the deploy's file check names the missing file (gemini joined claude on 2026-10-14). **Since 2026-10-16 each role is its own GitHub App** (one App served every role before, so a gemini container acted as the claude App's bot on GitHub): on the Droplet, `mv /etc/cocoon-gateway/app.pem /etc/cocoon-gateway/claude-app.pem`, add `gemini-app.pem` (the gemini App's private key, copied from your machine), replace the three `GITHUB_APP_*` lines of `env` with the six per-role lines of step 5, `chown`/`chmod` as in step 5, then redeploy; the deploy refuses the old names and a missing pem by name.
+After a merge to main, on the Droplet, as root. A role added to `config/policy.json` needs its token file in `/etc/cocoon-gateway/` and its `GATEWAY_TOKEN_<ROLE>_FILE` line in `env` first: the server refuses to start without every role's token, and the deploy's file check names the missing file (gemini joined claude on 2026-10-14). **Since 2026-10-16 each role is its own GitHub App** (one App served every role before, so a gemini container acted as the claude App's bot on GitHub): on the Droplet, `mv /etc/cocoon-gateway/app.pem /etc/cocoon-gateway/claude-app.pem`, add `gemini-app.pem` (the gemini App's private key, copied from your machine), write `env` whole again with step 5's `printf` (every line, the six per-role ones among them; never an in-place edit of that file: on 2026-10-16 a pasted `sed -i` chain left it with three lines of twelve and the gateway down), `chown`/`chmod` as in step 5, then redeploy; the deploy refuses the old names and a missing pem by name.
 
 ```
 curl -fsSL https://raw.githubusercontent.com/theCocoonStudio/cocoon-gateway/main/scripts/deploy-droplet.sh -o deploy-droplet.sh && bash deploy-droplet.sh
 ```
 
-The script downloads main again and builds it. From PR 6 on, the new container is created beside the old one, swapped in under the name once created, waited for until healthy, and the previous image is removed only then; a start that is not healthy within 60 s keeps the previous image and says so. A changed secret (a new key, a new token) is read at the container's start: `docker restart cocoon-gateway` after the file changes, or a redeploy.
+The script downloads main again and builds it. The swap is in three moves (2026-10-16): the new image is started once beside the old one with no ports and must come up healthy within 60 s, or the deploy stops with its first lines printed and the old gateway untouched; then the old container is stopped and kept, the new one takes the name and is waited for; healthy, the old container and image go; not healthy, the new one is removed and the old one is started again. Before that day the old container was removed before the new one had started, and a bad env file left no gateway for forty minutes.
 
 ## Reading the gateway
 
