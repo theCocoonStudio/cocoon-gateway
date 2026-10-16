@@ -13,7 +13,7 @@ const upstreams = { ...read('../config/upstreams.json'), domain: secret('GATEWAY
 const policy = read('../config/policy.json');
 const tokens = Object.fromEntries(Object.keys(policy.roles).map((role) => [role, secret(`GATEWAY_TOKEN_${role.toUpperCase()}`, { required: true })]));
 
-const app = createApp({ upstreams, policy, credentials: fromEnvironment(upstreams), roleOf: roleFromCertificateAndToken(policy, tokens) });
+const app = createApp({ upstreams, policy, credentials: fromEnvironment(upstreams, policy), roleOf: roleFromCertificateAndToken(policy, tokens) });
 const server = https.createServer(
   { key: secret('GATEWAY_TLS_KEY', { required: true }), cert: secret('GATEWAY_TLS_CERT', { required: true }), ca: secret('GATEWAY_CLIENT_CA', { required: true }), requestCert: true, rejectUnauthorized: true, minVersion: 'TLSv1.3' },
   app,

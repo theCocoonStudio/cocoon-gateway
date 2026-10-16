@@ -22,13 +22,14 @@ before(async () => {
 after(() => upstream.close());
 
 const upstreams = { domain: 'gw.test', upstreams: { github: { host: 'api.github.com', credential: 'github_app', rewrite: { '^/api/v3(/.*)$': '$1' } }, arxiv: { host: 'arxiv.org', credential: null }, anthropic: { host: 'api.anthropic.com', credential: 'passthrough' } } };
-const policy = { roles: { claude: { cn: 'claude' } }, rules: [
+const policy = { roles: { claude: { cn: 'claude' }, gemini: { cn: 'gemini' } }, rules: [
+  { role: 'gemini', upstream: 'github', method: 'GET', path: '.*' },
   { role: 'claude', upstream: 'github', method: 'GET', path: '.*' },
   { role: 'claude', upstream: 'github', method: 'POST', path: '^(/api/v3)?/repos/[^/]+/[^/]+/pulls$' },
   { role: 'claude', upstream: 'arxiv', method: 'GET', path: '.*' },
   { role: 'claude', upstream: 'anthropic', method: 'POST', path: '^/v1/messages$' },
 ] };
-const credentials = { async headersFor(kind) { return kind === 'github_app' ? { authorization: 'Bearer UPSTREAM-TOKEN' } : {}; } };
+const credentials = { async headersFor(kind, role) { return kind === 'github_app' ? { authorization: `Bearer UPSTREAM-TOKEN-${role}` } : {}; } };
 const logs = [];
 const app = createApp({ upstreams, policy, credentials, roleOf: (req) => req.headers['x-test-role'] || null, log: (l) => logs.push(l), targetOf: () => ({ host: '127.0.0.1', port: upstreamPort, scheme: 'http' }) });
 
@@ -60,13 +61,19 @@ test('an allowed request is proxied: Host rewritten, the client credential dropp
   assert.equal(r.status, 200);
   assert.equal(received.url, '/repos/o/r/pulls');
   assert.equal(received.headers.host, 'api.github.com');
-  assert.equal(received.headers.authorization, 'Bearer UPSTREAM-TOKEN');
+  assert.equal(received.headers.authorization, 'Bearer UPSTREAM-TOKEN-claude', 'the asking role\'s credential, not a shared one');
   assert.equal(received.body, '{"title":"t"}');
   assert.ok(received.headers['x-request-id']);
   assert.equal(r.headers['x-request-id'], received.headers['x-request-id']);
   assert.equal(JSON.parse(r.data).echo, '{"title":"t"}');
   const line = logs.find((l) => l.id === r.headers['x-request-id'] && l.status === 200);
   assert.ok(line && line.role === 'claude' && line.upstream === 'github');
+});
+
+test('a second role on the same upstream gets its own credential injected, never the first role\'s', async () => {
+  const r = await call({ method: 'GET', path: '/api/v3/zen', headers: { host: 'github.gw.test', 'x-test-role': 'gemini' } });
+  assert.equal(r.status, 200);
+  assert.equal(received.headers.authorization, 'Bearer UPSTREAM-TOKEN-gemini');
 });
 
 test('a redirect to the upstream host comes back pointing at the gateway subdomain', async () => {
