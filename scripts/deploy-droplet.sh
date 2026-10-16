@@ -9,13 +9,16 @@
 # Before the first run, as root on the host:
 #   mkdir -m 700 /etc/cocoon-gateway        # every file below lives HERE on this host; the container sees
 #                                           # the same directory at the same path, mounted read-only
-#   # from the owner's machine (scripts/certs.sh): server.key, server.crt, root.crt; the App's private key
-#   # as app.pem; one <role>.token per role; then:
+#   # from the owner's machine (scripts/certs.sh): server.key, server.crt, root.crt; one <role>.token per role;
+#   # one <role>-app.pem per role with GitHub rules (each role is its own GitHub App, 2026-10-16); then:
 #   cat > /etc/cocoon-gateway/env <<'ENV'
 #   GATEWAY_DOMAIN=<the parent of the gateway's subdomains, e.g. gw.example.com>
-#   GITHUB_APP_ID=<the App's id>
-#   GITHUB_APP_INSTALLATION_ID=<its installation id on the account: the number in the App's installation page URL>
-#   GITHUB_APP_PRIVATE_KEY_FILE=/etc/cocoon-gateway/app.pem
+#   GITHUB_APP_CLAUDE_ID=<the claude App's id>
+#   GITHUB_APP_CLAUDE_INSTALLATION_ID=<its installation id on the account: the number in the App's installation page URL>
+#   GITHUB_APP_CLAUDE_PRIVATE_KEY_FILE=/etc/cocoon-gateway/claude-app.pem
+#   GITHUB_APP_GEMINI_ID=<the gemini App's id>
+#   GITHUB_APP_GEMINI_INSTALLATION_ID=<its installation id>
+#   GITHUB_APP_GEMINI_PRIVATE_KEY_FILE=/etc/cocoon-gateway/gemini-app.pem
 #   GATEWAY_TLS_KEY_FILE=/etc/cocoon-gateway/server.key
 #   GATEWAY_TLS_CERT_FILE=/etc/cocoon-gateway/server.crt
 #   GATEWAY_CLIENT_CA_FILE=/etc/cocoon-gateway/root.crt
@@ -50,7 +53,7 @@ done
 [ "$(id -u)" = 0 ] || { echo "deploy: run as root (docker and $SECRETS)" >&2; exit 1; }
 # The env file is in the loop with the secrets: the same owner check, since the header prescribes the
 # same chown for every file in SECRETS (the owner, 2026-10-11).
-for f in env app.pem server.key server.crt root.crt claude.token gemini.token; do   # one <role>.token per role in config/policy.json; the server refuses to start without each
+for f in env server.key server.crt root.crt claude.token gemini.token claude-app.pem gemini-app.pem; do   # one <role>.token per role in config/policy.json, one <role>-app.pem per role with GitHub rules; the server refuses to start without each
   [ -r "$SECRETS/$f" ] || { echo "deploy: $SECRETS/$f is missing" >&2; exit 1; }
   [ "$(stat -c %u "$SECRETS/$f")" = 1000 ] || { echo "deploy: $SECRETS/$f must be owned by uid 1000 (the container's user)" >&2; exit 1; }
 done
@@ -59,6 +62,11 @@ done
 # shape before 2026-10-12 and would point the container at nothing: refused, with the one-line fix.
 if grep -q -- /run/cocoon-gateway "$SECRETS/env"; then
   echo "deploy: $SECRETS/env names /run/cocoon-gateway; the files are mounted at $SECRETS now: sed -i 's|/run/cocoon-gateway|$SECRETS|' $SECRETS/env" >&2; exit 1
+fi
+# The App is per role since 2026-10-16 (one App served every role before, so a second role acted as the first's
+# bot on GitHub): the unsuffixed names are the old shape and would start nothing; refused, with the fix.
+if grep -qE '^GITHUB_APP_(ID|INSTALLATION_ID|PRIVATE_KEY|PRIVATE_KEY_FILE)=' "$SECRETS/env"; then
+  echo "deploy: $SECRETS/env carries GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID or GITHUB_APP_PRIVATE_KEY_FILE; the App is per role: GITHUB_APP_CLAUDE_*, GITHUB_APP_GEMINI_* (docs/deploy.md step 5)" >&2; exit 1
 fi
 tmp=$(mktemp -d)
 trap 'rm -rf "${tmp:?}"' EXIT
