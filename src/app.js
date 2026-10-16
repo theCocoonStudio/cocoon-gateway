@@ -32,7 +32,7 @@ export function createApp({ upstreams, policy, credentials, roleOf, log = (line)
     if (!verdict.allow) return finish(403, { error: 'policy', detail: 'no rule allows this request' }, { role, upstream: key, rule: verdict.rule });
     const target = targetOf ? targetOf(key, upstream) : { host: upstream.host, port: 443, scheme: 'https' };
     const path = rewritePath(req.originalUrl, upstream.rewrite);
-    credentials.headersFor(upstream.credential).then(
+    credentials.headersFor(upstream.credential, role).then(
       (credentialHeaders) =>
         proxy(req, res, {
           target, hostHeader: upstream.host, credentialHeaders, path, requestId, hostToSubdomain, passthrough: upstream.credential === 'passthrough',

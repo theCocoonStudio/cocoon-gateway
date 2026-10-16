@@ -2,6 +2,13 @@
 // platform's secrets or files mounted read-only; src/env.js), never from the container. Each kind returns
 // the headers to inject upstream; `passthrough` injects nothing and lets the client's own credential through
 // (the owner's subscription login for the model, which the container holds and the gateway does not).
+//
+// A role is an identity, not only an access set. Each role with a rule on a GitHub upstream holds its own App
+// here, read from GITHUB_APP_<ROLE>_ID, GITHUB_APP_<ROLE>_INSTALLATION_ID and GITHUB_APP_<ROLE>_PRIVATE_KEY (or
+// the file it names), and the token injected is the asking role's. Until 2026-10-16 one App served every role:
+// the policy decided access per role and the gateway then acted as one identity, so a gemini container's GitHub
+// calls were made as the claude App's bot (the owner saw it in the container's start output and the CLI's).
+// A role with GitHub rules and no App of its own refuses the start, by the variable's name.
 import { createSign } from 'node:crypto';
 import { secret } from './env.js';
 
@@ -39,30 +46,45 @@ export function githubAppTokenSource({ appId, installationId, privateKey, fetchI
   };
 }
 
-// Only the kinds the upstreams table uses must be configured, checked once at start.
-export function fromEnvironment(upstreams = { upstreams: {} }) {
+// Only the kinds the upstreams table uses must be configured, and only for the roles whose rules reach them,
+// checked once at start.
+const GITHUB_KINDS = new Set(['github_app', 'github_app_basic']);
+export function rolesWithGithubRules(upstreams, policy) {
+  const githubUpstreams = new Set(Object.entries(upstreams.upstreams).filter(([, u]) => GITHUB_KINDS.has(u.credential)).map(([key]) => key));
+  return [...new Set((policy.rules || []).filter((r) => githubUpstreams.has(r.upstream)).map((r) => r.role))];
+}
+export function fromEnvironment(upstreams = { upstreams: {} }, policy = { roles: {}, rules: [] }, { fetchImpl = fetch } = {}) {
   const kinds = new Set(Object.values(upstreams.upstreams).map((u) => u.credential).filter(Boolean));
-  const github = kinds.has('github_app') || kinds.has('github_app_basic')
-    ? githubAppTokenSource({
-        appId: secret('GITHUB_APP_ID', { required: true }),
-        installationId: secret('GITHUB_APP_INSTALLATION_ID', { required: true }),
-        privateKey: secret('GITHUB_APP_PRIVATE_KEY', { required: true }),
-      })
-    : null;
+  const github = {};
+  for (const role of rolesWithGithubRules(upstreams, policy)) {
+    if (!/^[a-z][a-z0-9]*$/.test(role)) throw new Error(`credentials: role '${role}' cannot name environment variables (lowercase letters and digits only)`);
+    const name = `GITHUB_APP_${role.toUpperCase()}`;
+    github[role] = githubAppTokenSource({
+      appId: secret(`${name}_ID`, { required: true }),
+      installationId: secret(`${name}_INSTALLATION_ID`, { required: true }),
+      privateKey: secret(`${name}_PRIVATE_KEY`, { required: true }),
+      fetchImpl,
+    });
+  }
+  const tokenFor = (role) => {
+    const source = github[role];
+    if (!source) throw new Error(`credentials: role '${role}' holds no GitHub App at this gateway`);
+    return source();
+  };
   const anthropicKey = secret('ANTHROPIC_API_KEY');
   const anthropicToken = secret('ANTHROPIC_AUTH_TOKEN');
   if (kinds.has('anthropic') && !anthropicKey && !anthropicToken) throw new Error('credentials: ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN is not set');
   return {
-    async headersFor(kind) {
+    async headersFor(kind, role) {
       switch (kind) {
         case null:
         case undefined:
         case 'passthrough':
           return {};
         case 'github_app':
-          return { authorization: `Bearer ${await github()}` };
+          return { authorization: `Bearer ${await tokenFor(role)}` };
         case 'github_app_basic':
-          return { authorization: `Basic ${Buffer.from(`x-access-token:${await github()}`).toString('base64')}` };
+          return { authorization: `Basic ${Buffer.from(`x-access-token:${await tokenFor(role)}`).toString('base64')}` };
         case 'anthropic':
           return anthropicKey ? { 'x-api-key': anthropicKey } : { authorization: `Bearer ${anthropicToken}` };
         default:
