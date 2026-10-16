@@ -1,6 +1,6 @@
 # Deploying the gateway: a new Droplet, and a redeploy
 
-Three machines, each holding only its own. **Your machine**: the root's key and serial file, the App's private key, and the start of every copy. **The box** (the sandbox host): the sandbox configuration, the launcher, and the four files its container mounts; it reaches nothing and nothing is copied from it. **The Droplet**: the gateway's six files and the container. Replace `DOMAIN` (the parent of the subdomains, e.g. `gw.example.com`), `IP` (the Droplet's address), `APP_ID`, `INSTALLATION_ID` (the number in the App's installation page URL) and `APP_KEY` (the path of the App's private key on your machine) with your values; none of them belongs in a repository.
+Three machines, each holding only its own. **Your machine**: the root's key and serial file, each role's GitHub App private key, and the start of every copy. **The box** (the sandbox host): the sandbox configuration, the launcher, and the four files its container mounts; it reaches nothing and nothing is copied from it. **The Droplet**: the gateway's six files and the container. Replace `DOMAIN` (the parent of the subdomains, e.g. `gw.example.com`), `IP` (the Droplet's address), `APP_ID`, `INSTALLATION_ID` (the number in the App's installation page URL) and `APP_KEY` (the path of the App's private key on your machine) with your values; none of them belongs in a repository.
 
 ## 1. Once per installation: the certificates, on your machine
 
@@ -25,7 +25,7 @@ Writes, at mode 600 for the keys, refusing to overwrite: `root.key` and `root.sr
 | `gemini.token` | yes | yes |
 | `server.key` | no | yes |
 | `server.crt` | no | yes |
-| the App's private key | no (once the gateway shape is on) | yes, as `app.pem` |
+| each role's GitHub App private key | no (once the gateway shape is on) | yes, as `claude-app.pem`, `gemini-app.pem` |
 | `env` (step 5) | no | yes |
 
 Copy them however your machine reaches each host; the box's directory is the one the sandbox configuration names.
@@ -47,10 +47,10 @@ Then the Droplet's files of step 2 into `/etc/cocoon-gateway/`.
 The paths are the host's: the container sees `/etc/cocoon-gateway` at the same path, mounted read-only.
 
 ```
-printf '%s\n' 'GATEWAY_DOMAIN=DOMAIN' 'GITHUB_APP_ID=APP_ID' 'GITHUB_APP_INSTALLATION_ID=INSTALLATION_ID' 'GITHUB_APP_PRIVATE_KEY_FILE=/etc/cocoon-gateway/app.pem' 'GATEWAY_TLS_KEY_FILE=/etc/cocoon-gateway/server.key' 'GATEWAY_TLS_CERT_FILE=/etc/cocoon-gateway/server.crt' 'GATEWAY_CLIENT_CA_FILE=/etc/cocoon-gateway/root.crt' 'GATEWAY_TOKEN_CLAUDE_FILE=/etc/cocoon-gateway/claude.token' 'GATEWAY_TOKEN_GEMINI_FILE=/etc/cocoon-gateway/gemini.token' > /etc/cocoon-gateway/env && chown -R 1000:1000 /etc/cocoon-gateway && chmod 600 /etc/cocoon-gateway/* && wc -l /etc/cocoon-gateway/app.pem && openssl rsa -check -noout -in /etc/cocoon-gateway/app.pem && ls -la /etc/cocoon-gateway
+printf '%s\n' 'GATEWAY_DOMAIN=DOMAIN' 'GITHUB_APP_CLAUDE_ID=CLAUDE_APP_ID' 'GITHUB_APP_CLAUDE_INSTALLATION_ID=CLAUDE_INSTALLATION_ID' 'GITHUB_APP_CLAUDE_PRIVATE_KEY_FILE=/etc/cocoon-gateway/claude-app.pem' 'GITHUB_APP_GEMINI_ID=GEMINI_APP_ID' 'GITHUB_APP_GEMINI_INSTALLATION_ID=GEMINI_INSTALLATION_ID' 'GITHUB_APP_GEMINI_PRIVATE_KEY_FILE=/etc/cocoon-gateway/gemini-app.pem' 'GATEWAY_TLS_KEY_FILE=/etc/cocoon-gateway/server.key' 'GATEWAY_TLS_CERT_FILE=/etc/cocoon-gateway/server.crt' 'GATEWAY_CLIENT_CA_FILE=/etc/cocoon-gateway/root.crt' 'GATEWAY_TOKEN_CLAUDE_FILE=/etc/cocoon-gateway/claude.token' 'GATEWAY_TOKEN_GEMINI_FILE=/etc/cocoon-gateway/gemini.token' > /etc/cocoon-gateway/env && chown -R 1000:1000 /etc/cocoon-gateway && chmod 600 /etc/cocoon-gateway/* && wc -l /etc/cocoon-gateway/claude-app.pem /etc/cocoon-gateway/gemini-app.pem && openssl rsa -check -noout -in /etc/cocoon-gateway/claude-app.pem && openssl rsa -check -noout -in /etc/cocoon-gateway/gemini-app.pem && ls -la /etc/cocoon-gateway
 ```
 
-Expected: `27 /etc/cocoon-gateway/app.pem`, `RSA key ok`, seven files owned `1000 1000` at `-rw-------` (env, app.pem, server.key, server.crt, root.crt, claude.token, gemini.token). A key that fails the check is a bad copy: copy it again as a file, never through a paste.
+Expected: `27` lines for each pem, `RSA key ok` twice, eight files owned `1000 1000` at `-rw-------` (env, server.key, server.crt, root.crt, claude.token, gemini.token, claude-app.pem, gemini-app.pem). A key that fails the check is a bad copy: copy it again as a file, never through a paste.
 
 ## 6. The deploy, on the Droplet, as root
 
@@ -58,7 +58,7 @@ Expected: `27 /etc/cocoon-gateway/app.pem`, `RSA key ok`, seven files owned `100
 curl -fsSL https://raw.githubusercontent.com/theCocoonStudio/cocoon-gateway/main/scripts/deploy-droplet.sh -o deploy-droplet.sh && bash deploy-droplet.sh
 ```
 
-The script checks its tools and the seven files, downloads this repository's main as one tarball, checks the archive against the commit, builds the image, starts the container and waits for its health check. It prints the commit deployed, then `deploy: cocoon-gateway Up ... (healthy) 0.0.0.0:443->8443/tcp, 0.0.0.0:8443->8443/tcp` and the container's last log lines, ending with `{"listening":8443,"domain":"DOMAIN"}` and `{"health":8080}`.
+The script checks its tools and the eight files, downloads this repository's main as one tarball, checks the archive against the commit, builds the image, starts the container and waits for its health check. It prints the commit deployed, then `deploy: cocoon-gateway Up ... (healthy) 0.0.0.0:443->8443/tcp, 0.0.0.0:8443->8443/tcp` and the container's last log lines, ending with `{"listening":8443,"domain":"DOMAIN"}` and `{"health":8080}`.
 
 ## 7. The check, from your machine
 
@@ -68,7 +68,7 @@ Mutual TLS, the role's token, the policy and the App credential, end to end, wit
 curl -sS --cacert ~/.config/cocoon/gateway/root.crt --cert ~/.config/cocoon/gateway/claude.crt --key ~/.config/cocoon/gateway/claude.key -H "Proxy-Authorization: Bearer $(cat ~/.config/cocoon/gateway/claude.token)" --resolve github.DOMAIN:8443:IP https://github.DOMAIN:8443/api/v3/zen
 ```
 
-Expected: one line of GitHub's zen. A 503 with `credential` in the body is the App key (step 5's check, then `docker restart cocoon-gateway`, since the key is read once at start); a handshake error is the certificates.
+Expected: one line of GitHub's zen. A 503 with `credential` in the body is that role's App key (step 5's check, then `docker restart cocoon-gateway`, since the key is read once at start); a handshake error is the certificates.
 
 ## 8. The sandbox, on the box
 
@@ -76,7 +76,7 @@ The sandbox configuration (`~/.config/cocoon/sandbox.json`) gets the two gateway
 
 ## Redeploying
 
-After a merge to main, on the Droplet, as root. A role added to `config/policy.json` needs its token file in `/etc/cocoon-gateway/` and its `GATEWAY_TOKEN_<ROLE>_FILE` line in `env` first: the server refuses to start without every role's token, and the deploy's file check names the missing file (gemini joined claude on 2026-10-14).
+After a merge to main, on the Droplet, as root. A role added to `config/policy.json` needs its token file in `/etc/cocoon-gateway/` and its `GATEWAY_TOKEN_<ROLE>_FILE` line in `env` first: the server refuses to start without every role's token, and the deploy's file check names the missing file (gemini joined claude on 2026-10-14). **Since 2026-10-16 each role is its own GitHub App** (one App served every role before, so a gemini container acted as the claude App's bot on GitHub): on the Droplet, `mv /etc/cocoon-gateway/app.pem /etc/cocoon-gateway/claude-app.pem`, add `gemini-app.pem` (the gemini App's private key, copied from your machine), replace the three `GITHUB_APP_*` lines of `env` with the six per-role lines of step 5, `chown`/`chmod` as in step 5, then redeploy; the deploy refuses the old names and a missing pem by name.
 
 ```
 curl -fsSL https://raw.githubusercontent.com/theCocoonStudio/cocoon-gateway/main/scripts/deploy-droplet.sh -o deploy-droplet.sh && bash deploy-droplet.sh
