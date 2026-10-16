@@ -82,38 +82,70 @@ tar -xzf "$tmp/src.tgz" -C "$tmp"
 echo "deploy: $REPO@$REF is $sha"
 
 docker build -t "$IMAGE:$sha" -t "$IMAGE:latest" "$tmp/$top"
-# The swap. The new container is created beside the old one first: a create binds no port, and a wrong
-# option (an unknown flag on an older Docker included) fails here while the old one still serves. Then
-# the old one goes, the new one takes its name and starts, and the deploy waits for its health check
-# before calling it done. The previous image is removed only then, so a failed start leaves it for the
-# rollback the message names; a second run of this script with the same ref removes nothing.
+# The swap, in three moves, so the old gateway serves until the new one has proven it starts, and comes
+# back if the new one fails anyway. Until 2026-10-16 the old container was removed before the new one had
+# started: a deploy whose env file had lost nine of its twelve lines then left no gateway at all for forty
+# minutes (the new one crashed at start, the old one was gone, the image kept was useless without the env).
+#   1. The probe: the new image is started once beside the old one with no port published (so nothing
+#      collides), the same env file and mounts, and must reach healthy within 60 s; a crash at start, a
+#      missing variable, an unreadable file all fail here, with the container's first lines printed, while
+#      the old one still serves. The probe is removed either way.
+#   2. The real container is created with the ports (a wrong option fails here too, old one still up),
+#      the old one is STOPPED and kept under a side name, the new one takes the name and starts, and the
+#      deploy waits for its health check.
+#   3. Healthy: the stopped old container and the previous image go. Not healthy: the new one is removed,
+#      the old one gets its name back and is started again, and the deploy exits 1 saying so.
+COMMON=(--restart unless-stopped --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges
+  -v "$SECRETS:$SECRETS:ro" --env-file "$SECRETS/env"
+  --health-cmd 'node -e "fetch(\"http://127.0.0.1:8080/healthz\").then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"'
+  --health-interval 30s --health-timeout 5s --health-retries 3 --health-start-period 30s --health-start-interval 3s)
+wait_healthy() { # wait_healthy <container>: prints the final state; healthy within 60 s or not
+  local state=unknown
+  for _ in $(seq 1 20); do
+    state=$(docker inspect -f '{{.State.Health.Status}}' "$1" 2>/dev/null || echo unknown)
+    [ "$state" = healthy ] && break
+    sleep 3
+  done
+  echo "$state"
+}
 previous=$(docker inspect -f '{{.Config.Image}}' "$NAME" 2>/dev/null || true)
-docker rm -f "$NAME-next" >/dev/null 2>&1 || true
-docker create --name "$NAME-next" --restart unless-stopped \
-  --read-only --tmpfs /tmp \
-  --cap-drop ALL --security-opt no-new-privileges \
-  -p "$PORT:8443" -p "$RELAY_PORT:8443" \
-  -v "$SECRETS:$SECRETS:ro" \
-  --env-file "$SECRETS/env" \
-  --health-cmd 'node -e "fetch(\"http://127.0.0.1:8080/healthz\").then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"' \
-  --health-interval 30s --health-timeout 5s --health-retries 3 \
-  --health-start-period 30s --health-start-interval 3s \
-  "$IMAGE:$sha" >/dev/null
-docker rm -f "$NAME" >/dev/null 2>&1 || true
+
+docker rm -f "$NAME-probe" "$NAME-next" "$NAME-previous" >/dev/null 2>&1 || true
+docker create --name "$NAME-probe" "${COMMON[@]}" "$IMAGE:$sha" >/dev/null
+docker start "$NAME-probe" >/dev/null
+state=$(wait_healthy "$NAME-probe")
+if [ "$state" != healthy ]; then
+  echo "deploy: the probe start of $IMAGE:$sha is '$state' after 60 s; the running gateway was not touched. Its first lines:" >&2
+  docker logs "$NAME-probe" 2>&1 | head -8 >&2
+  docker rm -f "$NAME-probe" >/dev/null 2>&1 || true
+  exit 1
+fi
+docker rm -f "$NAME-probe" >/dev/null
+echo "deploy: probe start healthy; swapping"
+
+docker create --name "$NAME-next" "${COMMON[@]}" -p "$PORT:8443" -p "$RELAY_PORT:8443" "$IMAGE:$sha" >/dev/null
+had_old=0
+if docker inspect "$NAME" >/dev/null 2>&1; then
+  had_old=1
+  docker stop "$NAME" >/dev/null
+  docker rename "$NAME" "$NAME-previous"
+fi
 docker rename "$NAME-next" "$NAME"
 docker start "$NAME" >/dev/null
-state=unknown
-for _ in $(seq 1 20); do
-  state=$(docker inspect -f '{{.State.Health.Status}}' "$NAME" 2>/dev/null || echo unknown)
-  [ "$state" = healthy ] && break
-  sleep 3
-done
+state=$(wait_healthy "$NAME")
 docker ps --filter "name=^$NAME$" --format 'deploy: {{.Names}} {{.Status}} {{.Ports}}'
 docker logs "$NAME" 2>&1 | tail -3
 if [ "$state" != healthy ]; then
-  echo "deploy: $NAME is '$state' after 60 s; the previous image ${previous:-(none)} is kept: redeploy at the previous ref, or docker run it by hand" >&2
+  echo "deploy: $NAME is '$state' after 60 s; rolling back" >&2
+  docker rm -f "$NAME" >/dev/null 2>&1 || true
+  if [ "$had_old" = 1 ]; then
+    docker rename "$NAME-previous" "$NAME"
+    docker start "$NAME" >/dev/null
+    echo "deploy: the previous container is serving again (${previous:-(unknown image)})" >&2
+  fi
   exit 1
 fi
+if [ "$had_old" = 1 ]; then docker rm -f "$NAME-previous" >/dev/null 2>&1 || true; fi
 if [ -n "$previous" ] && [ "$previous" != "$IMAGE:$sha" ]; then
   if docker image rm "$previous" >/dev/null 2>&1; then echo "deploy: previous image $previous removed"; else echo "deploy: previous image $previous kept (in use, or already gone)"; fi
 fi
