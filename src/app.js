@@ -4,7 +4,7 @@ import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { compile, decide } from './policy.js';
 import { proxy, rewritePath } from './proxy.js';
 
-export function createApp({ upstreams, policy, credentials, roleOf, log = (line) => console.log(JSON.stringify(line)), targetOf }) {
+export function createApp({ upstreams, policy, credentials, roleOf, log = (line) => console.log(JSON.stringify(line)), targetOf, proxyOptions = {} }) {
   const compiled = compile(policy);
   const domain = upstreams.domain;
   if (typeof domain !== 'string' || !domain) throw new Error('createApp: upstreams.domain is required (the gateway reads GATEWAY_DOMAIN from its environment; the repository carries no domain)');
@@ -36,7 +36,8 @@ export function createApp({ upstreams, policy, credentials, roleOf, log = (line)
       (credentialHeaders) =>
         proxy(req, res, {
           target, hostHeader: upstream.host, credentialHeaders, path, requestId, hostToSubdomain, passthrough: upstream.credential === 'passthrough',
-          onDone: ({ status, ms, bytes }) => log({ ts: new Date().toISOString(), id: requestId, role, upstream: key, method: req.method, path, status, ms, bytes, rule: verdict.rule }),
+          acceptEncoding: upstream.encoding, ...proxyOptions,
+          onDone: ({ status, ms, bytes, detail }) => log({ ts: new Date().toISOString(), id: requestId, role, upstream: key, method: req.method, path, status, ms, bytes, rule: verdict.rule, ...(detail ? { detail } : {}) }),
         }),
       (err) => finish(503, { error: 'credential', detail: err.message }, { role, upstream: key }),
     );

@@ -13,15 +13,18 @@ before(async () => {
       received = { method: req.method, url: req.url, headers: req.headers, body };
       if (req.url === '/redirect') return res.writeHead(302, { location: 'https://api.github.com/repos/o/r/pulls/1' }).end();
       if (req.url === '/stream') { res.writeHead(200, { 'content-type': 'text/event-stream' }); res.write('data: one\n\n'); setTimeout(() => { res.write('data: two\n\n'); res.end(); }, 20); return; }
+      if (req.url === '/gap') { res.writeHead(200, { 'content-type': 'text/event-stream' }); res.write('data: one\n\n'); setTimeout(() => { res.write('data: two\n\n'); res.end(); }, 150); return; } // silent longer than the connect timeout
+      if (req.url === '/cut') { res.writeHead(200, { 'content-type': 'text/event-stream', 'content-encoding': 'gzip' }); res.write('data: one\n\n'); setTimeout(() => res.destroy(), 20); return; } // the upstream dies mid-stream
+      if (req.url === '/never') { return; } // no headers, ever
       res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ echo: body }));
     });
   });
   await new Promise((r) => upstream.listen(0, '127.0.0.1', r));
   upstreamPort = upstream.address().port;
 });
-after(() => upstream.close());
+after(() => { upstream.closeAllConnections(); upstream.close(); }); // the /never handler holds its connection open on purpose
 
-const upstreams = { domain: 'gw.test', upstreams: { github: { host: 'api.github.com', credential: 'github_app', rewrite: { '^/api/v3(/.*)$': '$1' } }, arxiv: { host: 'arxiv.org', credential: null }, anthropic: { host: 'api.anthropic.com', credential: 'passthrough' } } };
+const upstreams = { domain: 'gw.test', upstreams: { github: { host: 'api.github.com', credential: 'github_app', rewrite: { '^/api/v3(/.*)$': '$1' } }, arxiv: { host: 'arxiv.org', credential: null }, anthropic: { host: 'api.anthropic.com', credential: 'passthrough', encoding: 'identity' } } };
 const policy = { roles: { claude: { cn: 'claude' }, gemini: { cn: 'gemini' } }, rules: [
   { role: 'gemini', upstream: 'github', method: 'GET', path: '.*' },
   { role: 'claude', upstream: 'github', method: 'GET', path: '.*' },
@@ -31,11 +34,11 @@ const policy = { roles: { claude: { cn: 'claude' }, gemini: { cn: 'gemini' } }, 
 ] };
 const credentials = { async headersFor(kind, role) { return kind === 'github_app' ? { authorization: `Bearer UPSTREAM-TOKEN-${role}` } : {}; } };
 const logs = [];
-const app = createApp({ upstreams, policy, credentials, roleOf: (req) => req.headers['x-test-role'] || null, log: (l) => logs.push(l), targetOf: () => ({ host: '127.0.0.1', port: upstreamPort, scheme: 'http' }) });
+const app = createApp({ upstreams, policy, credentials, roleOf: (req) => req.headers['x-test-role'] || null, log: (l) => logs.push(l), targetOf: () => ({ host: '127.0.0.1', port: upstreamPort, scheme: 'http' }), proxyOptions: { connectTimeoutMs: 60, idleTimeoutMs: 1000 } });
 
 let server, port;
 before(async () => { server = http.createServer(app); await new Promise((r) => server.listen(0, '127.0.0.1', r)); port = server.address().port; });
-after(() => server.close());
+after(() => { server.closeAllConnections(); server.close(); });
 
 const call = (opts, body) => new Promise((resolve, reject) => {
   const req = http.request({ host: '127.0.0.1', port, ...opts }, (res) => { let data = ''; res.on('data', (c) => { data += c; }); res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, data })); });
@@ -82,6 +85,36 @@ test('a redirect to the upstream host comes back pointing at the gateway subdoma
   assert.equal(r.headers.location, 'https://github.gw.test/repos/o/r/pulls/1');
 });
 
+test('a stream silent for longer than the connect timeout is not cut: the idle timeout alone bounds a response that has begun', async () => {
+  const r = await call({ method: 'GET', path: '/gap', headers: { host: 'github.gw.test', 'x-test-role': 'claude' } });
+  assert.equal(r.status, 200);
+  assert.equal(r.data, 'data: one\n\ndata: two\n\n');
+});
+
+test('an upstream that dies mid-stream cuts the client connection and appends nothing; the log says why with a 502', async () => {
+  const r = await new Promise((resolve, reject) => {
+    const req = http.request({ host: '127.0.0.1', port, method: 'GET', path: '/cut', headers: { host: 'github.gw.test', 'x-test-role': 'claude' } }, (res) => {
+      let data = ''; res.on('data', (c) => { data += c; });
+      res.on('aborted', () => resolve({ status: res.statusCode, data, aborted: true }));
+      res.on('error', () => resolve({ status: res.statusCode, data, aborted: true }));
+      res.on('end', () => resolve({ status: res.statusCode, data, aborted: false }));
+    });
+    req.on('error', reject); req.end();
+  });
+  assert.equal(r.status, 200, 'the headers had gone');
+  assert.equal(r.data, 'data: one\n\n', 'nothing appended after the cut: no JSON in an encoded stream');
+  assert.equal(r.aborted, true, 'the client sees the cut');
+  const line = logs.find((l) => l.path === '/cut' && l.status === 502);
+  assert.match(line.detail, /after the headers were sent/);
+});
+
+test('an upstream that never answers is a 502 with the request id, as before', async () => {
+  const r = await call({ method: 'GET', path: '/never', headers: { host: 'github.gw.test', 'x-test-role': 'claude' } });
+  assert.equal(r.status, 502);
+  assert.match(JSON.parse(r.data).detail, /connect timeout/);
+  assert.ok(JSON.parse(r.data).requestId);
+});
+
 test('a streamed response arrives in order, untouched', async () => {
   const r = await call({ method: 'GET', path: '/stream', headers: { host: 'github.gw.test', 'x-test-role': 'claude' } });
   assert.equal(r.status, 200);
@@ -103,6 +136,12 @@ test('a passthrough upstream keeps the client\'s own credentials and still never
   assert.equal(received.headers['x-api-key'], 'K');
   assert.equal(received.headers['proxy-authorization'], undefined);
   assert.equal(received.headers.host, 'api.anthropic.com');
+  assert.equal(received.headers['accept-encoding'], 'identity', 'the model upstream is asked for an uncompressed body (the owner, 2026-10-13)');
+});
+
+test('an upstream without the encoding mark keeps the client\'s Accept-Encoding', async () => {
+  await call({ method: 'GET', path: '/x', headers: { host: 'github.gw.test', 'x-test-role': 'claude', 'accept-encoding': 'gzip, br' } });
+  assert.equal(received.headers['accept-encoding'], 'gzip, br');
 });
 
 test('the app refuses to start without a domain: the repository carries none, the environment supplies it', () => {

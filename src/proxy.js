@@ -2,6 +2,21 @@
 // byte, so git's packs and the model's event streams survive. The client's own credentials never go
 // up; the upstream's credential is injected here; Host is rewritten to the upstream; Location headers
 // in responses are rewritten back to the gateway's subdomains so a redirect stays inside the wall.
+//
+// Two timeouts, not one (2026-10-16). Until the upstream answers with headers, the connect timeout
+// (30 s) bounds a dead or silent upstream. Once the response streams, the idle timeout (10 min) is the
+// only cut: a model's event stream can go thirty seconds and more between bytes while it thinks, and the
+// one 30 s socket timeout of the first version destroyed the upstream in that silence. Worse, the error
+// path then wrote its JSON onto the body already half sent, so a gzip-encoded stream ended in garbage
+// and the client's decoder threw a ZlibError (the owner saw it on 2026-10-13 and twice on the 16th; the
+// gateway's own log showed a 502 for a request the relay had logged as 200). Now an upstream failure
+// after the headers have gone closes the client's connection and writes nothing more: a cut stream is
+// a cut stream, never a patched one; the log line carries the detail and the 502.
+//
+// An upstream marked `encoding: identity` in config/upstreams.json is asked for an uncompressed body
+// (the owner's fix of 2026-10-13 for the model API): nothing on the path inflates, and a cut, should one
+// still happen, is a short stream the client can see, not a decoder error. The other upstreams keep the
+// client's Accept-Encoding: packuments and API bodies compress well, and git's packs are bytes anyway.
 import http from 'node:http';
 import https from 'node:https';
 
@@ -29,7 +44,7 @@ export function rewriteLocation(location, hostToSubdomain) {
   return location;
 }
 
-export function proxy(req, res, { target, hostHeader, credentialHeaders, path, requestId, hostToSubdomain, onDone, passthrough = false }) {
+export function proxy(req, res, { target, hostHeader, credentialHeaders, path, requestId, hostToSubdomain, onDone, passthrough = false, acceptEncoding, connectTimeoutMs = 30_000, idleTimeoutMs = 600_000 }) {
   const headers = {};
   for (const [k, v] of Object.entries(req.headers)) {
     if (DROP.has(k)) continue;
@@ -37,24 +52,44 @@ export function proxy(req, res, { target, hostHeader, credentialHeaders, path, r
     headers[k] = v;
   }
   Object.assign(headers, credentialHeaders, { host: hostHeader, 'x-request-id': requestId }); // the upstream's name, whatever address we connect to
+  if (acceptEncoding) headers['accept-encoding'] = acceptEncoding;
   const client = target.scheme === 'http' ? http : https;
   const started = Date.now();
   let bytes = 0;
-  const up = client.request({ host: target.host, port: target.port, method: req.method, path, headers, timeout: 30_000 }, (upRes) => {
+  let phase = 'connect';
+  let done = false;
+  const cut = (err) => {
+    if (done) return;
+    done = true;
+    // The headers and part of the body are gone: nothing is appended (an error document inside an encoded
+    // or event stream is garbage to the client); the connection is closed so the client sees the cut.
+    res.destroy();
+    onDone && onDone({ status: 502, ms: Date.now() - started, bytes, detail: `upstream failed after the headers were sent: ${err.message}` });
+  };
+  const up = client.request({ host: target.host, port: target.port, method: req.method, path, headers, timeout: connectTimeoutMs }, (upRes) => {
+    phase = 'stream';
+    up.setTimeout(idleTimeoutMs);
     const out = { ...upRes.headers, 'x-request-id': requestId };
     delete out.connection;
     delete out['transfer-encoding'];
     if (out.location) out.location = rewriteLocation(out.location, hostToSubdomain);
     res.writeHead(upRes.statusCode, out);
     upRes.on('data', (chunk) => { bytes += chunk.length; });
-    upRes.on('end', () => onDone && onDone({ status: upRes.statusCode, ms: Date.now() - started, bytes }));
+    upRes.on('end', () => { done = true; onDone && onDone({ status: upRes.statusCode, ms: Date.now() - started, bytes }); });
+    // The upstream can vanish mid-body without an error on the request object: the response then closes
+    // incomplete. That is the same cut as a mid-stream error, handled the same way.
+    upRes.on('error', () => {});
+    upRes.on('close', () => { if (!done && !upRes.complete) cut(new Error('upstream closed the connection mid-stream')); });
     upRes.pipe(res);
   });
-  up.on('timeout', () => up.destroy(new Error('connect timeout')));
+  up.on('timeout', () => up.destroy(new Error(phase === 'connect' ? `connect timeout (${connectTimeoutMs} ms with no response headers)` : `idle timeout (${idleTimeoutMs} ms with no bytes mid-stream)`)));
   up.on('error', (err) => {
-    if (!res.headersSent) res.writeHead(502, { 'content-type': 'application/json', 'x-request-id': requestId });
+    if (res.headersSent) return cut(err);
+    if (done) return;
+    done = true;
+    res.writeHead(502, { 'content-type': 'application/json', 'x-request-id': requestId });
     res.end(JSON.stringify({ error: 'upstream', detail: err.message, requestId }));
-    onDone && onDone({ status: 502, ms: Date.now() - started, bytes });
+    onDone && onDone({ status: 502, ms: Date.now() - started, bytes, detail: err.message });
   });
   req.pipe(up);
 }
