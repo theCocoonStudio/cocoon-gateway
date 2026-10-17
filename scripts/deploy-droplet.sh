@@ -110,7 +110,25 @@ wait_healthy() { # wait_healthy <container>: prints the final state; healthy wit
 }
 previous=$(docker inspect -f '{{.Config.Image}}' "$NAME" 2>/dev/null || true)
 
-docker rm -f "$NAME-probe" "$NAME-next" "$NAME-previous" >/dev/null 2>&1 || true
+# A run that died between its two renames (an ssh drop, a kill) leaves the known-good container stopped under
+# $NAME-previous and the new one, healthy or not, under $NAME, or nothing under $NAME at all. Removing $NAME-previous
+# here, as the first form of this script did, destroyed the only rollback target before the probe had run (Gemini's
+# review of 2026-10-17). So: if $NAME is healthy the previous is a finished run's leftover and goes; otherwise the
+# previous comes back as $NAME, started, before anything else is touched.
+if docker inspect "$NAME-previous" >/dev/null 2>&1; then
+  if [ "$(docker inspect -f '{{.State.Health.Status}}' "$NAME" 2>/dev/null || echo none)" = healthy ]; then
+    docker rm -f "$NAME-previous" >/dev/null 2>&1 || true
+  else
+    echo "deploy: a previous run died mid-swap; restoring $NAME-previous as $NAME before this run" >&2
+    docker rm -f "$NAME" >/dev/null 2>&1 || true
+    docker rename "$NAME-previous" "$NAME"
+    docker start "$NAME" >/dev/null
+    state=$(wait_healthy "$NAME")
+    [ "$state" = healthy ] || { echo "deploy: the restored container is '$state' after 60 s; stopping here, nothing else touched" >&2; exit 1; }
+    echo "deploy: restored; continuing"
+  fi
+fi
+docker rm -f "$NAME-probe" "$NAME-next" >/dev/null 2>&1 || true
 docker create --name "$NAME-probe" "${COMMON[@]}" "$IMAGE:$sha" >/dev/null
 docker start "$NAME-probe" >/dev/null
 state=$(wait_healthy "$NAME-probe")
