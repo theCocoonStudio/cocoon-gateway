@@ -79,7 +79,8 @@ export function proxy(req, res, { target, hostHeader, credentialHeaders, path, r
     if (out.location) out.location = rewriteLocation(out.location, hostToSubdomain);
     res.writeHead(upRes.statusCode, out);
     upRes.on('data', (chunk) => { bytes += chunk.length; });
-    upRes.on('end', () => { done = true; onDone && onDone({ status: upRes.statusCode, ms: Date.now() - started, bytes }); });
+    // 'end' can still fire after a cut (the buffered rest of a response drains after the destroy): one line per request.
+    upRes.on('end', () => { if (done) return; done = true; onDone && onDone({ status: upRes.statusCode, ms: Date.now() - started, bytes }); });
     // The upstream can vanish mid-body without an error on the request object: the response then closes
     // incomplete. That is the same cut as a mid-stream error, handled the same way.
     upRes.on('error', () => {});

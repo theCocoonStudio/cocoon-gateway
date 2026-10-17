@@ -16,6 +16,7 @@ before(async () => {
       if (req.url === '/gap') { res.writeHead(200, { 'content-type': 'text/event-stream' }); res.write('data: one\n\n'); setTimeout(() => { res.write('data: two\n\n'); res.end(); }, 150); return; } // silent longer than the connect timeout
       if (req.url === '/cut') { res.writeHead(200, { 'content-type': 'text/event-stream', 'content-encoding': 'gzip' }); res.write('data: one\n\n'); setTimeout(() => res.destroy(), 20); return; } // the upstream dies mid-stream
       if (req.url === '/never') { return; } // no headers, ever
+      if (req.url === '/stall') { res.writeHead(200, { 'content-type': 'text/event-stream' }); res.write('data: one\n\n'); setTimeout(() => { if (!res.destroyed) { res.write('data: late\n\n'); res.end(); } }, 1400); return; } // silent longer than the idle timeout, then more
       if (req.url === '/slow') { res.writeHead(200, { 'content-type': 'text/event-stream' }); res.write('data: one\n\n'); let n = 0; const iv = setInterval(() => { if (res.destroyed) { clearInterval(iv); return; } n += 1; res.write(`data: ${n}\n\n`); if (n === 20) { clearInterval(iv); res.end(); } }, 50); res.on('close', () => { clearInterval(iv); slowClosed = { at: Date.now(), ended: res.writableEnded }; }); return; } // a long stream; the client leaves first
       res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ echo: body }));
     });
@@ -126,6 +127,25 @@ test('a client that closes its connection mid-stream has the upstream request de
   assert.equal(line.status, 499);
   assert.match(line.detail, /client closed the connection mid-stream/);
   assert.equal(logs.filter((l) => l.path === '/slow').length, 1, 'logged once');
+});
+
+test('an upstream silent for longer than the idle timeout mid-stream is cut with one 502 line, and the late bytes do not log a second line', async () => {
+  const r = await new Promise((resolve, reject) => {
+    const req = http.request({ host: '127.0.0.1', port, method: 'GET', path: '/stall', headers: { host: 'github.gw.test', 'x-test-role': 'claude' } }, (res) => {
+      let data = ''; res.on('data', (c) => { data += c; });
+      res.on('aborted', () => resolve({ data, aborted: true }));
+      res.on('error', () => resolve({ data, aborted: true }));
+      res.on('end', () => resolve({ data, aborted: false }));
+    });
+    req.on('error', reject); req.end();
+  });
+  assert.equal(r.aborted, true, 'the client sees the cut');
+  assert.equal(r.data, 'data: one\n\n', 'nothing appended');
+  await new Promise((rr) => setTimeout(rr, 700));
+  const lines = logs.filter((l) => l.path === '/stall');
+  assert.equal(lines.length, 1, `one line, not one per event (${JSON.stringify(lines.map((l) => l.status))})`);
+  assert.equal(lines[0].status, 502);
+  assert.match(lines[0].detail, /idle timeout/);
 });
 
 test('an upstream that never answers is a 502 with the request id, as before', async () => {
