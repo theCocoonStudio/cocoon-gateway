@@ -21,17 +21,18 @@ before(async () => {
 });
 after(() => upstream.close());
 
-const upstreams = { domain: 'gw.test', upstreams: { github: { host: 'api.github.com', credential: 'github_app', rewrite: { '^/api/v3(/.*)$': '$1' } }, arxiv: { host: 'arxiv.org', credential: null }, anthropic: { host: 'api.anthropic.com', credential: 'passthrough' } } };
+const upstreams = { domain: 'gw.test', upstreams: { github: { host: 'api.github.com', credential: 'github_app', rewrite: { '^/api/v3(/.*)$': '$1', '^/api/graphql$': '/graphql' } }, arxiv: { host: 'arxiv.org', credential: null }, anthropic: { host: 'api.anthropic.com', credential: 'passthrough' } } };
 const policy = { roles: { claude: { cn: 'claude' }, gemini: { cn: 'gemini' } }, rules: [
   { role: 'gemini', upstream: 'github', method: 'GET', path: '.*' },
   { role: 'claude', upstream: 'github', method: 'GET', path: '.*' },
   { role: 'claude', upstream: 'github', method: 'POST', path: '^(/api/v3)?/repos/[^/]+/[^/]+/pulls$' },
+  { role: 'claude', upstream: 'github', method: 'POST', path: '^(/api/graphql|/graphql)$' },
   { role: 'claude', upstream: 'arxiv', method: 'GET', path: '.*' },
   { role: 'claude', upstream: 'anthropic', method: 'POST', path: '^/v1/messages$' },
 ] };
 const credentials = { async headersFor(kind, role) { return kind === 'github_app' ? { authorization: `Bearer UPSTREAM-TOKEN-${role}` } : {}; } };
 const logs = [];
-const app = createApp({ upstreams, policy, credentials, roleOf: (req) => req.headers['x-test-role'] || null, log: (l) => logs.push(l), targetOf: () => ({ host: '127.0.0.1', port: upstreamPort, scheme: 'http' }) });
+const app = createApp({ upstreams, policy, credentials, roleOf: (req) => req.headers['x-test-role'] || null, log: (l) => logs.push(l), targetOf: () => ({ host: '127.0.0.1', port: upstreamPort, scheme: 'http' }), graphqlBodyCapBytes: 4096 });
 
 let server, port;
 before(async () => { server = http.createServer(app); await new Promise((r) => server.listen(0, '127.0.0.1', r)); port = server.address().port; });
@@ -42,6 +43,44 @@ const call = (opts, body) => new Promise((resolve, reject) => {
   req.on('error', reject);
   if (body) req.write(body);
   req.end();
+});
+
+const gql = (body) => call({ method: 'POST', path: '/api/graphql', headers: { host: 'github.gw.test', 'x-test-role': 'claude', 'content-type': 'application/json' } }, body);
+
+test('a GraphQL query passes and arrives whole, byte for byte', async () => {
+  const body = JSON.stringify({ query: 'query PR($n: Int!) { repository(owner: "o", name: "r") { pullRequest(number: $n) { title } } }', variables: { n: 1 } });
+  const r = await gql(body);
+  assert.equal(r.status, 200);
+  assert.equal(received.url, '/graphql', 'rewritten to the API host\'s path');
+  assert.equal(received.body, body);
+  assert.equal(received.headers['content-length'], String(Buffer.byteLength(body)));
+});
+
+test('a GraphQL mutation never passes, for any role: 403, a log line, nothing sent upstream', async () => {
+  received = null;
+  const r = await gql(JSON.stringify({ query: 'mutation Merge($id: ID!) { mergePullRequest(input: { pullRequestId: $id }) { clientMutationId } }', variables: { id: 'x' } }));
+  assert.equal(r.status, 403);
+  assert.match(JSON.parse(r.data).detail, /mutations never pass/);
+  assert.equal(received, null, 'the upstream saw nothing');
+  const line = logs.find((l) => l.status === 403 && l.rule === 'graphql');
+  assert.ok(line, 'the refusal is one log line');
+});
+
+test('a batch with one mutation is refused whole; the shorthand and comments are read right', async () => {
+  const r1 = await gql(JSON.stringify([{ query: '{ viewer { login } }' }, { query: 'mutation { addComment(input: {subjectId: "x", body: "y"}) { clientMutationId } }' }]));
+  assert.equal(r1.status, 403);
+  const r2 = await gql(JSON.stringify({ query: '# a mutation in a comment is not one\n{ search(query: "mutation", type: ISSUE, first: 1) { issueCount } }' }));
+  assert.equal(r2.status, 200, 'the word inside a comment or a string is not the keyword');
+  const r3 = await gql(JSON.stringify({ query: 'subscription { x }' }));
+  assert.equal(r3.status, 403);
+});
+
+test('a GraphQL body that is not a query document, or is larger than the cap, is refused', async () => {
+  assert.equal((await gql('not json')).status, 403);
+  assert.equal((await gql(JSON.stringify({ q: 'query { x }' }))).status, 403);
+  assert.equal((await gql(JSON.stringify([]))).status, 403);
+  const big = JSON.stringify({ query: '{ viewer { login } } ' + ' '.repeat(5000) });
+  assert.equal((await gql(big)).status, 413);
 });
 
 test('an unknown host is misdirected, never proxied', async () => {
