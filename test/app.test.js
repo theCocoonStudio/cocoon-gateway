@@ -4,7 +4,7 @@ import http from 'node:http';
 import { createApp } from '../src/app.js';
 
 // A fake upstream that records what it received and answers with a redirect, a stream, or an echo.
-let upstream, upstreamPort, received;
+let upstream, upstreamPort, received, slowClosed;
 before(async () => {
   upstream = http.createServer((req, res) => {
     let body = '';
@@ -16,6 +16,7 @@ before(async () => {
       if (req.url === '/gap') { res.writeHead(200, { 'content-type': 'text/event-stream' }); res.write('data: one\n\n'); setTimeout(() => { res.write('data: two\n\n'); res.end(); }, 150); return; } // silent longer than the connect timeout
       if (req.url === '/cut') { res.writeHead(200, { 'content-type': 'text/event-stream', 'content-encoding': 'gzip' }); res.write('data: one\n\n'); setTimeout(() => res.destroy(), 20); return; } // the upstream dies mid-stream
       if (req.url === '/never') { return; } // no headers, ever
+      if (req.url === '/slow') { res.writeHead(200, { 'content-type': 'text/event-stream' }); res.write('data: one\n\n'); let n = 0; const iv = setInterval(() => { if (res.destroyed) { clearInterval(iv); return; } n += 1; res.write(`data: ${n}\n\n`); if (n === 20) { clearInterval(iv); res.end(); } }, 50); res.on('close', () => { clearInterval(iv); slowClosed = { at: Date.now(), ended: res.writableEnded }; }); return; } // a long stream; the client leaves first
       res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ echo: body }));
     });
   });
@@ -106,6 +107,25 @@ test('an upstream that dies mid-stream cuts the client connection and appends no
   assert.equal(r.aborted, true, 'the client sees the cut');
   const line = logs.find((l) => l.path === '/cut' && l.status === 502);
   assert.match(line.detail, /after the headers were sent/);
+});
+
+test('a client that closes its connection mid-stream has the upstream request destroyed at once and a 499 line, not an idle timeout ten minutes later', async () => {
+  slowClosed = null;
+  const left = await new Promise((resolve, reject) => {
+    const req = http.request({ host: '127.0.0.1', port, method: 'GET', path: '/slow', headers: { host: 'github.gw.test', 'x-test-role': 'claude' } }, (res) => {
+      res.once('data', () => { req.destroy(); resolve(Date.now()); });
+    });
+    req.on('error', reject); req.end();
+  });
+  await new Promise((r) => setTimeout(r, 200));
+  assert.ok(slowClosed, 'the upstream saw its response closed');
+  assert.equal(slowClosed.ended, false, 'closed before the upstream had finished: the stream was cut, not read to its end');
+  assert.ok(slowClosed.at - left < 150, `the upstream was cut within 150 ms of the client leaving, not at the idle timeout (${slowClosed.at - left} ms)`);
+  const line = logs.find((l) => l.path === '/slow');
+  assert.ok(line, 'one log line for the request');
+  assert.equal(line.status, 499);
+  assert.match(line.detail, /client closed the connection mid-stream/);
+  assert.equal(logs.filter((l) => l.path === '/slow').length, 1, 'logged once');
 });
 
 test('an upstream that never answers is a 502 with the request id, as before', async () => {
