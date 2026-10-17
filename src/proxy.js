@@ -29,7 +29,7 @@ export function rewriteLocation(location, hostToSubdomain) {
   return location;
 }
 
-export function proxy(req, res, { target, hostHeader, credentialHeaders, path, requestId, hostToSubdomain, onDone, passthrough = false }) {
+export function proxy(req, res, { target, hostHeader, credentialHeaders, path, requestId, hostToSubdomain, onDone, passthrough = false, body }) {
   const headers = {};
   for (const [k, v] of Object.entries(req.headers)) {
     if (DROP.has(k)) continue;
@@ -37,6 +37,7 @@ export function proxy(req, res, { target, hostHeader, credentialHeaders, path, r
     headers[k] = v;
   }
   Object.assign(headers, credentialHeaders, { host: hostHeader, 'x-request-id': requestId }); // the upstream's name, whatever address we connect to
+  if (body !== undefined) { headers['content-length'] = String(Buffer.byteLength(body)); delete headers['transfer-encoding']; } // a body the app read first (the GraphQL gate)
   const client = target.scheme === 'http' ? http : https;
   const started = Date.now();
   let bytes = 0;
@@ -56,5 +57,5 @@ export function proxy(req, res, { target, hostHeader, credentialHeaders, path, r
     res.end(JSON.stringify({ error: 'upstream', detail: err.message, requestId }));
     onDone && onDone({ status: 502, ms: Date.now() - started, bytes });
   });
-  req.pipe(up);
+  if (body !== undefined) up.end(body); else req.pipe(up);
 }
