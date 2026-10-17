@@ -17,6 +17,10 @@
 // (the owner's fix of 2026-10-13 for the model API): nothing on the path inflates, and a cut, should one
 // still happen, is a short stream the client can see, not a decoder error. The other upstreams keep the
 // client's Accept-Encoding: packuments and API bodies compress well, and git's packs are bytes anyway.
+//
+// A client that closes its own connection first (2026-10-17, Gemini's finding on the review of this change) has
+// its upstream request destroyed at once and a 499 line in the log; before, the upstream ran on unread until the
+// idle timeout and the line said 502.
 import http from 'node:http';
 import https from 'node:https';
 
@@ -90,6 +94,16 @@ export function proxy(req, res, { target, hostHeader, credentialHeaders, path, r
     res.writeHead(502, { 'content-type': 'application/json', 'x-request-id': requestId });
     res.end(JSON.stringify({ error: 'upstream', detail: err.message, requestId }));
     onDone && onDone({ status: 502, ms: Date.now() - started, bytes, detail: err.message });
+  });
+  // The client can go away first: a cancelled model call, a closed terminal, a dropped relay. Without this the
+  // upstream request ran on (a model stream to its end, unread, the bytes sitting in the socket) and the log line
+  // came only when the idle timeout fired, ten minutes later, as a 502 blamed on the upstream (Gemini's finding on
+  // the review of 2026-10-17, measured). Now the upstream is destroyed at once and the line says what happened, 499.
+  res.on('close', () => {
+    if (done) return;
+    done = true;
+    up.destroy();
+    onDone && onDone({ status: 499, ms: Date.now() - started, bytes, detail: `client closed the connection ${phase === 'connect' ? 'before the upstream answered' : 'mid-stream'}` });
   });
   req.pipe(up);
 }
