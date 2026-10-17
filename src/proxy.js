@@ -48,7 +48,7 @@ export function rewriteLocation(location, hostToSubdomain) {
   return location;
 }
 
-export function proxy(req, res, { target, hostHeader, credentialHeaders, path, requestId, hostToSubdomain, onDone, passthrough = false, acceptEncoding, connectTimeoutMs = 30_000, idleTimeoutMs = 600_000 }) {
+export function proxy(req, res, { target, hostHeader, credentialHeaders, path, requestId, hostToSubdomain, onDone, passthrough = false, acceptEncoding, connectTimeoutMs = 30_000, idleTimeoutMs = 600_000, body }) {
   const headers = {};
   for (const [k, v] of Object.entries(req.headers)) {
     if (DROP.has(k)) continue;
@@ -57,6 +57,7 @@ export function proxy(req, res, { target, hostHeader, credentialHeaders, path, r
   }
   Object.assign(headers, credentialHeaders, { host: hostHeader, 'x-request-id': requestId }); // the upstream's name, whatever address we connect to
   if (acceptEncoding) headers['accept-encoding'] = acceptEncoding;
+  if (body !== undefined) { headers['content-length'] = String(Buffer.byteLength(body)); delete headers['transfer-encoding']; } // a body the app read first (the GraphQL gate)
   const client = target.scheme === 'http' ? http : https;
   const started = Date.now();
   let bytes = 0;
@@ -106,5 +107,5 @@ export function proxy(req, res, { target, hostHeader, credentialHeaders, path, r
     up.destroy();
     onDone && onDone({ status: 499, ms: Date.now() - started, bytes, detail: `client closed the connection ${phase === 'connect' ? 'before the upstream answered' : 'mid-stream'}` });
   });
-  req.pipe(up);
+  if (body !== undefined) up.end(body); else req.pipe(up);
 }
