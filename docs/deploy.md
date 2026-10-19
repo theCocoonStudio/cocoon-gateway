@@ -82,7 +82,7 @@ After a merge to main, on the Droplet, as root. A role added to `config/policy.j
 curl -fsSL https://raw.githubusercontent.com/theCocoonStudio/cocoon-gateway/main/scripts/deploy-droplet.sh -o deploy-droplet.sh && bash deploy-droplet.sh
 ```
 
-The script downloads main again and builds it. The swap is in three moves (2026-10-16): the new image is started once beside the old one with no ports and must come up healthy within 60 s, or the deploy stops with its first lines printed and the old gateway untouched; then the old container is stopped and kept, the new one takes the name and is waited for; healthy, the old container and image go; not healthy, the new one is removed and the old one is started again. Before that day the old container was removed before the new one had started, and a bad env file left no gateway for forty minutes.
+The script downloads main again and builds it. A change to `src/` alone, such as the ref gate and the pull-request edit gate of 2026-10-19, needs nothing in `env` or `/etc/cocoon-gateway/`: this redeploy and nothing else. The swap is in three moves (2026-10-16): the new image is started once beside the old one with no ports and must come up healthy within 60 s, or the deploy stops with its first lines printed and the old gateway untouched; then the old container is stopped and kept, the new one takes the name and is waited for; healthy, the old container and image go; not healthy, the new one is removed and the old one is started again. Before that day the old container was removed before the new one had started, and a bad env file left no gateway for forty minutes.
 
 ## Reading the gateway
 
