@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "template": {
+    "metadata": { "version": 4.6, "type": "Object", "generator": "cocoon scene agent template" },
+    "geometries": [
+      { "uuid": "geometry-main", "type": "BoxGeometry", "width": 1, "height": 1, "depth": 1 }
+    ],
+    "materials": [
+      { "uuid": "material-main", "type": "MeshStandardMaterial", "color": 2792847, "roughness": 0.5, "metalness": 0.1, "emissive": 0 }
+    ],
+    "object": {
+      "uuid": "scene",
+      "type": "Scene",
+      "background": 1053720,
+      "matrix": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+      "children": [
+        { "uuid": "mesh-main", "type": "Mesh", "name": "main", "geometry": "geometry-main", "material": "material-main", "visible": true, "matrix": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] },
+        { "uuid": "light-ambient", "type": "AmbientLight", "name": "ambient", "color": 16777215, "intensity": 0.6, "matrix": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] }
+      ]
+    }
+  },
+  "paths": {
+    "background": { "kind": "colour", "default": "#101418", "target": "/object/background" },
+    "main.colour": { "kind": "colour", "default": "#2a9d8f", "target": "/materials/0/color" },
+    "main.emissive": { "kind": "colour", "default": "#000000", "target": "/materials/0/emissive" },
+    "main.roughness": { "kind": "number", "min": 0, "max": 1, "step": 0.05, "default": 0.5, "target": "/materials/0/roughness" },
+    "main.metalness": { "kind": "number", "min": 0, "max": 1, "step": 0.05, "default": 0.1, "target": "/materials/0/metalness" },
+    "main.size": { "kind": "number", "min": 0.5, "max": 3, "step": 0.1, "default": 1, "targets": ["/geometries/0/width", "/geometries/0/height", "/geometries/0/depth"] },
+    "ambient.intensity": { "kind": "number", "min": 0, "max": 2, "step": 0.1, "default": 0.6, "target": "/object/children/1/intensity" },
+    "ambient.colour": { "kind": "colour", "default": "#ffffff", "target": "/object/children/1/color" },
+    "fog": {
+      "kind": "enum",
+      "values": ["none", "thin", "thick"],
+      "default": "none",
+      "target": "/object/fog",
+      "encode": {
+        "none": null,
+        "thin": { "type": "Fog", "color": 1053720, "near": 5, "far": 30 },
+        "thick": { "type": "Fog", "color": 1053720, "near": 2, "far": 12 }
+      }
+    },
+    "main.visible": { "kind": "boolean", "default": true, "target": "/object/children/0/visible" }
+  },
+  "slots": {
+    "light.key": { "accepts": ["directional", "point", "area"], "fixed": false, "target": "/object/children" },
+    "light.fill": { "accepts": ["directional", "point", "area"], "fixed": false, "target": "/object/children" }
+  },
+  "kinds": {
+    "directional": {
+      "tier": "both",
+      "node": { "type": "DirectionalLight", "color": 16777215, "intensity": 1, "matrix": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 5, 8, 5, 1] },
+      "values": {
+        "intensity": { "kind": "number", "min": 0, "max": 5, "step": 0.1, "default": 1, "target": "/intensity" },
+        "colour": { "kind": "colour", "default": "#ffffff", "target": "/color" }
+      }
+    },
+    "point": {
+      "tier": "both",
+      "node": { "type": "PointLight", "color": 16777215, "intensity": 1, "distance": 0, "decay": 2, "matrix": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, -4, 3, 4, 1] },
+      "values": {
+        "intensity": { "kind": "number", "min": 0, "max": 5, "step": 0.1, "default": 1, "target": "/intensity" },
+        "colour": { "kind": "colour", "default": "#ffffff", "target": "/color" }
+      }
+    },
+    "area": {
+      "tier": "webgpu",
+      "node": { "type": "RectAreaLight", "color": 16777215, "intensity": 1, "width": 4, "height": 4, "matrix": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 6, 0, 1] },
+      "values": {
+        "intensity": { "kind": "number", "min": 0, "max": 5, "step": 0.1, "default": 1, "target": "/intensity" },
+        "colour": { "kind": "colour", "default": "#ffffff", "target": "/color" }
+      }
+    }
+  }
+}
