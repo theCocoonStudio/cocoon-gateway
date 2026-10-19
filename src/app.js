@@ -3,8 +3,9 @@ import express from 'express';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { compile, decide } from './policy.js';
 import { proxy, rewritePath } from './proxy.js';
+import { readReceivePackHead, refuseReceivePack } from './git.js';
 
-export function createApp({ upstreams, policy, credentials, roleOf, log = (line) => console.log(JSON.stringify(line)), targetOf, proxyOptions = {}, graphqlBodyCapBytes = 1 << 20 }) {
+export function createApp({ upstreams, policy, credentials, roleOf, log = (line) => console.log(JSON.stringify(line)), targetOf, proxyOptions = {}, graphqlBodyCapBytes = 1 << 20, receivePackHeadCapBytes = 1 << 16 }) {
   const compiled = compile(policy);
   const domain = upstreams.domain;
   if (typeof domain !== 'string' || !domain) throw new Error('createApp: upstreams.domain is required (the gateway reads GATEWAY_DOMAIN from its environment; the repository carries no domain)');
@@ -32,15 +33,42 @@ export function createApp({ upstreams, policy, credentials, roleOf, log = (line)
     if (!verdict.allow) return finish(403, { error: 'policy', detail: 'no rule allows this request' }, { role, upstream: key, rule: verdict.rule });
     const target = targetOf ? targetOf(key, upstream) : { host: upstream.host, port: 443, scheme: 'https' };
     const path = rewritePath(req.originalUrl, upstream.rewrite);
-    const go = (body) => credentials.headersFor(upstream.credential, role).then(
+    const go = (body, bodyHead, bodyEnded) => credentials.headersFor(upstream.credential, role).then(
       (credentialHeaders) =>
         proxy(req, res, {
-          target, hostHeader: upstream.host, credentialHeaders, path, requestId, hostToSubdomain, passthrough: upstream.credential === 'passthrough', body,
+          target, hostHeader: upstream.host, credentialHeaders, path, requestId, hostToSubdomain, passthrough: upstream.credential === 'passthrough', body, bodyHead, bodyEnded,
           acceptEncoding: upstream.encoding, ...proxyOptions,
           onDone: ({ status, ms, bytes, detail }) => log({ ts: new Date().toISOString(), id: requestId, role, upstream: key, method: req.method, path, status, ms, bytes, rule: verdict.rule, ...(detail ? { detail } : {}) }),
         }),
       (err) => finish(503, { error: 'credential', detail: err.message }, { role, upstream: key }),
     );
+    if (key === 'git' && req.method === 'POST' && RECEIVE_PACK_PATH.test(req.path)) {
+      // The ref gate (2026-10-19). A push is passed through unparsed, so the table's absence of a DELETE method
+      // never reached refs; the command list that opens a push body is read here, bounded, and a deletion or a
+      // signed push is refused for every role before a byte goes up (src/git.js). An encoded body cannot be read
+      // and is refused too; git sends pushes plain.
+      if (req.headers['content-encoding']) return finish(403, { error: 'policy', detail: 'an encoded push body cannot be read for its ref commands; push without content-encoding' }, { role, upstream: key, rule: 'git-receive-pack' });
+      readReceivePackHead(req, receivePackHeadCapBytes).then(({ head, ended, parsed }) => {
+        const reason = refuseReceivePack(parsed);
+        if (reason) { req.resume(); return finish(403, { error: 'policy', detail: reason }, { role, upstream: key, rule: 'git-receive-pack', refs: parsed.commands.map((c) => c.ref) }); }
+        go(undefined, head, ended);
+      }, (err) => { finish(403, { error: 'policy', detail: `the push body could not be read as a receive-pack command list: ${err.message}` }, { role, upstream: key, rule: 'git-receive-pack' }); });
+      return;
+    }
+    if (key === 'github' && req.method === 'PATCH' && PULL_PATH.test(req.path)) {
+      // The pull-request edit gate (2026-10-19). PATCH on a pull request is allowed for a title or a body; the same
+      // route closes the pull request (`state`) or moves its base branch (`base`), which no agent does; those two
+      // fields are refused for every role, the rest passes as sent.
+      readBody(req, graphqlBodyCapBytes).then((buf) => {
+        let parsed;
+        try { parsed = JSON.parse(buf.toString('utf8')); } catch { return finish(403, { error: 'policy', detail: 'the pull-request edit could not be read as a JSON object' }, { role, upstream: key, rule: 'pulls-patch' }); }
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return finish(403, { error: 'policy', detail: 'the pull-request edit could not be read as a JSON object' }, { role, upstream: key, rule: 'pulls-patch' });
+        const refused = ['state', 'base'].filter((k) => k in parsed);
+        if (refused.length) return finish(403, { error: 'policy', detail: `closing a pull request or moving its base never passes this gateway (${refused.join(', ')}); the owner's hand` }, { role, upstream: key, rule: 'pulls-patch' });
+        go(buf);
+      }, (err) => finish(413, { error: 'policy', detail: err.message }, { role, upstream: key, rule: 'pulls-patch' }));
+      return;
+    }
     if (!(key === 'github' && req.method === 'POST' && GRAPHQL_PATH.test(req.path))) return go();
     // The GraphQL gate (2026-10-17). A GraphQL body names no repository in its path and can do anything the
     // token can (createCommitOnBranch, mergePullRequest, addComment), so the path rules above cannot bound it,
@@ -57,6 +85,8 @@ export function createApp({ upstreams, policy, credentials, roleOf, log = (line)
 }
 
 const GRAPHQL_PATH = /^(\/api\/graphql|\/graphql)$/;
+const RECEIVE_PACK_PATH = /\/git-receive-pack$/;
+const PULL_PATH = /^(\/api\/v3)?\/repos\/[^/]+\/[^/]+\/pulls\/[0-9]+$/;
 
 // Read a request body whole, up to a cap; past the cap the request is refused (a GraphQL document is small).
 export function readBody(req, cap) {
