@@ -48,7 +48,7 @@ export function rewriteLocation(location, hostToSubdomain) {
   return location;
 }
 
-export function proxy(req, res, { target, hostHeader, credentialHeaders, path, requestId, hostToSubdomain, onDone, passthrough = false, acceptEncoding, connectTimeoutMs = 30_000, idleTimeoutMs = 600_000, body }) {
+export function proxy(req, res, { target, hostHeader, credentialHeaders, path, requestId, hostToSubdomain, onDone, passthrough = false, acceptEncoding, connectTimeoutMs = 30_000, idleTimeoutMs = 600_000, body, bodyHead, bodyEnded }) {
   const headers = {};
   for (const [k, v] of Object.entries(req.headers)) {
     if (DROP.has(k)) continue;
@@ -107,5 +107,10 @@ export function proxy(req, res, { target, hostHeader, credentialHeaders, path, r
     up.destroy();
     onDone && onDone({ status: 499, ms: Date.now() - started, bytes, detail: `client closed the connection ${phase === 'connect' ? 'before the upstream answered' : 'mid-stream'}` });
   });
-  if (body !== undefined) up.end(body); else req.pipe(up);
+  // A body the app read in part (the receive-pack command list) is written first and the rest piped as it
+  // comes, the client's own length and encoding headers untouched since every byte is forwarded; a push whose
+  // body ended inside the head (deletions alone send no pack) ends here too.
+  if (body !== undefined) up.end(body);
+  else if (bodyHead !== undefined) { up.write(bodyHead); if (bodyEnded) up.end(); else req.pipe(up); }
+  else req.pipe(up);
 }
