@@ -77,7 +77,7 @@ test('gemini holds the claude rule set minus the merge rule (the owner, 2026-10-
   const merge = rulesOf('claude').filter((r) => r.includes('(merge|update-branch)'));
   assert.equal(merge.length, 1, 'claude has the one merge rule');
   assert.deepEqual(rulesOf('gemini'), rulesOf('claude').filter((r) => !r.includes('(merge|update-branch)')));
-  assert.deepEqual(Object.keys(policy.roles), ['claude', 'gemini']);
+  assert.deepEqual(Object.keys(policy.roles), ['claude', 'gemini', 'site']); // site: the scene agent's service, one rule, the model (2026-10-19)
   const g = (u, m, p) => decide(c, 'gemini', u, m, p).allow;
   assert.equal(g('github', 'POST', `/api/v3/repos/${R}/pulls`), true);
   assert.equal(g('git', 'POST', `/${R}.git/git-receive-pack`), true);
@@ -85,4 +85,13 @@ test('gemini holds the claude rule set minus the merge rule (the owner, 2026-10-
   assert.equal(g('github', 'PUT', `/api/v3/repos/${R}/pulls/1/update-branch`), false);
   assert.equal(g('github', 'DELETE', '/api/v3/repos/o/r'), false);
   assert.equal(g('github', 'PATCH', '/api/v3/repos/o/r'), false);
+});
+
+test('the site role reaches the model and nothing else; the agents\' rules are not its', () => {
+  const site = (u, m, p) => decide(c, 'site', u, m, p).allow;
+  assert.equal(site('anthropic', 'POST', '/v1/messages'), true);
+  assert.equal(site('anthropic', 'GET', '/v1/models'), false);
+  assert.equal(site('github', 'GET', '/api/v3/repos/o/r'), false);
+  assert.equal(site('git', 'POST', `/${R}.git/git-receive-pack`), false);
+  assert.equal(site('npm', 'GET', '/express'), false);
 });

@@ -26,17 +26,18 @@ before(async () => {
 });
 after(() => { upstream.closeAllConnections(); upstream.close(); }); // the /never handler holds its connection open on purpose
 
-const upstreams = { domain: 'gw.test', upstreams: { github: { host: 'api.github.com', credential: 'github_app', rewrite: { '^/api/v3(/.*)$': '$1' } }, arxiv: { host: 'arxiv.org', credential: null }, anthropic: { host: 'api.anthropic.com', credential: 'passthrough', encoding: 'identity' } } };
+const upstreams = { domain: 'gw.test', upstreams: { github: { host: 'api.github.com', credential: 'github_app', rewrite: { '^/api/v3(/.*)$': '$1' } }, arxiv: { host: 'arxiv.org', credential: null }, anthropic: { host: 'api.anthropic.com', credential: 'passthrough', encoding: 'identity', credentialByRole: { site: 'anthropic' } } } };
 upstreams.upstreams.github.rewrite['^/api/graphql$'] = '/graphql';
-const policy = { roles: { claude: { cn: 'claude' }, gemini: { cn: 'gemini' } }, rules: [
+const policy = { roles: { claude: { cn: 'claude' }, gemini: { cn: 'gemini' }, site: { cn: 'site' } }, rules: [
   { role: 'gemini', upstream: 'github', method: 'GET', path: '.*' },
   { role: 'claude', upstream: 'github', method: 'GET', path: '.*' },
   { role: 'claude', upstream: 'github', method: 'POST', path: '^(/api/v3)?/repos/[^/]+/[^/]+/pulls$' },
   { role: 'claude', upstream: 'github', method: 'POST', path: '^(/api/graphql|/graphql)$' },
   { role: 'claude', upstream: 'arxiv', method: 'GET', path: '.*' },
   { role: 'claude', upstream: 'anthropic', method: 'POST', path: '^/v1/messages$' },
+  { role: 'site', upstream: 'anthropic', method: 'POST', path: '^/v1/messages$' },
 ] };
-const credentials = { async headersFor(kind, role) { return kind === 'github_app' ? { authorization: `Bearer UPSTREAM-TOKEN-${role}` } : {}; } };
+const credentials = { async headersFor(kind, role) { if (kind === 'github_app') return { authorization: `Bearer UPSTREAM-TOKEN-${role}` }; if (kind === 'anthropic') return { 'x-api-key': 'OWNER-KEY' }; return {}; } };
 const logs = [];
 const app = createApp({ upstreams, policy, credentials, roleOf: (req) => req.headers['x-test-role'] || null, log: (l) => logs.push(l), targetOf: () => ({ host: '127.0.0.1', port: upstreamPort, scheme: 'http' }), proxyOptions: { connectTimeoutMs: 60, idleTimeoutMs: 1000 }, graphqlBodyCapBytes: 4096 });
 
@@ -226,4 +227,21 @@ test('an upstream without the encoding mark keeps the client\'s Accept-Encoding'
 
 test('the app refuses to start without a domain: the repository carries none, the environment supplies it', () => {
   assert.throws(() => createApp({ upstreams: { upstreams: upstreams.upstreams }, policy, credentials, roleOf: () => 'claude' }), /upstreams.domain is required/);
+});
+
+// The per-role credential (2026-10-19): the model upstream is passthrough for the agents' CLIs, which carry their own
+// login token, and injects the owner's key for the site's agent, whose role names the kind in credentialByRole.
+test('a role named in credentialByRole gets that credential injected and its own dropped; the other roles pass theirs through as before', async () => {
+  received = null;
+  const site = await call({ method: 'POST', path: '/v1/messages', headers: { host: 'anthropic.gw.test', 'x-test-role': 'site', 'content-type': 'application/json', authorization: 'Bearer CLIENT-OWN', 'x-api-key': 'CLIENT-KEY' } }, '{"model":"m"}');
+  assert.equal(site.status, 200);
+  assert.equal(received.headers['x-api-key'], 'OWNER-KEY');
+  assert.equal(received.headers.authorization, undefined);
+  received = null;
+  const claude = await call({ method: 'POST', path: '/v1/messages', headers: { host: 'anthropic.gw.test', 'x-test-role': 'claude', 'content-type': 'application/json', authorization: 'Bearer CLIENT-OWN' } }, '{"model":"m"}');
+  assert.equal(claude.status, 200);
+  assert.equal(received.headers.authorization, 'Bearer CLIENT-OWN');
+  assert.equal(received.headers['x-api-key'], undefined);
+  const refused = await call({ method: 'GET', path: '/api/v3/repos/o/r', headers: { host: 'github.gw.test', 'x-test-role': 'site' } });
+  assert.equal(refused.status, 403, 'the site role has one rule, the model');
 });
