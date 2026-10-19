@@ -59,11 +59,14 @@ The shape that keeps the client certificate: the gateway terminates TLS itself, 
 - `scripts/certs.sh`: the private root, the server certificate, a client certificate and token per role.
 - `scripts/deploy-droplet.sh`: the deploy on a Droplet, run there as root.
 - `docs/scene-agent.spec.md`: the scene agent's service spec, the items for the owner's strike.
+- `agent/`: the agent's rules file (the system prompt, with the service's configuration as its front matter) and `scene.json`, the template and the allowlist table.
+- `src/agent/`: the first build of the spec: the table and the document (`scene.js`), the eight tools (`tools.js`), the configuration (`config.js`), the turn loop (`loop.js`), the model behind the gateway (`model.js`), the store (`store.js`), the endpoint (`server.js`); `src/agent-server.js` is its entry.
+- `test/agent/`: every tool against every refusal, the loop against a scripted model, the store on a set clock, the endpoint through HTTP.
 - `Dockerfile`: the image, the same in every shape.
 
 ## The scene agent
 
-The home page's agent over its 3D scene (records `site/scene-api.md`): a service on the Droplet beside the gateway, a client of it under a role of its own, specified in [docs/scene-agent.spec.md](docs/scene-agent.spec.md) item by item for the owner's strike (2026-10-19); its first build follows the spec.
+The home page's agent over its 3D scene (records `site/scene-api.md`): a service on the Droplet beside the gateway, a client of it under a role of its own, specified in [docs/scene-agent.spec.md](docs/scene-agent.spec.md) item by item for the owner's strike (2026-10-19); its first build is `src/agent/` (the tools as pure functions, the loop with its bounds, the store, the endpoint as an event stream; no deploy yet, scope.4), and the gateway gained the `site` role whose model calls carry the owner's key, injected here (`credentialByRole` in `config/upstreams.json`), so the agent's service holds no model key.
 
 ## Not in the first slice
 

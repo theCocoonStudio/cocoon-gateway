@@ -64,3 +64,17 @@ test('a role with GitHub rules and no App of its own refuses the start, by the v
   for (const k of Object.keys(process.env).filter((k) => k.startsWith('GITHUB_APP_'))) delete process.env[k];
   assert.throws(() => fromEnvironment(upstreams, { roles: {}, rules: [{ role: 'odd-name', upstream: 'github', method: 'GET', path: '.*' }] }), /cannot name environment variables/);
 });
+
+test('a kind named only by a role\'s own credential (credentialByRole) is required at start like any other', () => {
+  const saved = [process.env.ANTHROPIC_API_KEY, process.env.ANTHROPIC_AUTH_TOKEN];
+  delete process.env.ANTHROPIC_API_KEY; delete process.env.ANTHROPIC_AUTH_TOKEN;
+  try {
+    const upstreams = { upstreams: { anthropic: { host: 'api.anthropic.com', credential: 'passthrough', credentialByRole: { site: 'anthropic' } } } };
+    assert.throws(() => fromEnvironment(upstreams, { roles: { site: { cn: 'site' } }, rules: [] }), /ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN is not set/);
+    process.env.ANTHROPIC_API_KEY = 'k';
+    assert.ok(fromEnvironment(upstreams, { roles: { site: { cn: 'site' } }, rules: [] }));
+  } finally {
+    if (saved[0] === undefined) delete process.env.ANTHROPIC_API_KEY; else process.env.ANTHROPIC_API_KEY = saved[0];
+    if (saved[1] === undefined) delete process.env.ANTHROPIC_AUTH_TOKEN; else process.env.ANTHROPIC_AUTH_TOKEN = saved[1];
+  }
+});

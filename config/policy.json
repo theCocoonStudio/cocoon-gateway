@@ -1,7 +1,8 @@
 {
   "roles": {
     "claude": { "cn": "claude" },
-    "gemini": { "cn": "gemini" }
+    "gemini": { "cn": "gemini" },
+    "site":   { "cn": "site" }
   },
   "writable": [
     "theCocoonStudio/cocoon-ai",
@@ -41,6 +42,7 @@
     { "role": "gemini", "upstream": "npm",          "method": "GET", "path": ".*" },
     { "role": "gemini", "upstream": "npm",          "method": "POST", "path": "^/-/npm/v1/security/(advisories/bulk|audits/quick)$" },
     { "role": "gemini", "upstream": "arxiv",        "method": "GET", "path": ".*" },
-    { "role": "gemini", "upstream": "export-arxiv", "method": "GET", "path": ".*" }
+    { "role": "gemini", "upstream": "export-arxiv", "method": "GET", "path": ".*" },
+    { "role": "site",   "upstream": "anthropic", "method": "POST",  "path": "^/v1/messages$" }
   ]
 }
