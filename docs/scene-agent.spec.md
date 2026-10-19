@@ -126,3 +126,15 @@ scope.1: the renderer and the loader on the page: cocoon-ai's spec (records site
 scope.2: the Next backend's code, the cookie, the rate limiting and the refusal counts: the site's (layer 2)
 scope.3: the database engine and the log's sink: gateway #12
 scope.4: the deploy of the service on the Droplet: the step after the first build, in `docs/deploy.md`; the first build ships no deploy (issue #87, target 2)
+
+## Amendments, 2026-10-19 20:48 UTC (the renderer half's spec, cocoon-ai `src/AgentSceneGroup/AgentSceneGroup.spec.md`, its theme section; the owner's ask of 16:5x EDT to be specific about the theme API; Claude's calls, marked, for the owner's strike)
+
+api.2 (amended): the request body also carries `tones`, `{ ink, surface, ground, accent }`, four hex colours `#RRGGBB`, the site's theme as the page reads it off its CSS; validated at layer 3 as four colours of the table's colour kind or 400
+api.8: `PUT /v1/scene/:clientId/tones` with `{ tones }` and no prompt: no model call; the paths the agent has not set are re-based on the new tones, the agent's values stay; answers the document and its hash; a theme switch on the page costs one round trip and never a model call; counts as nothing against the client
+scene.1 (amended): a path in the table may carry `themed: "<tone>"`, one of the four names; the template's defaults for themed paths are what the tones replace: `ground` the scene's background and the fog's colour, `ink` the main material's colour, `surface` its emissive, `accent` the default colour of a node the agent adds
+scene.3 (amended): the base the service composes from is the template with its themed paths set from the request's tones; the state's values sit on top (the agent's), so `read()` shows the agent what the page shows and the hash covers the tones; the renderer composes nothing
+scene.7: precedence, stated once: the agent's value where set, the tone where the path is themed and unset, the template's default otherwise; the state records which paths the agent set and nothing else needs to
+store.1 (amended): the scene kept under the cookie keeps the agent's values and not the tones; the tones come with each request, so a visitor who switched theme between visits finds their scene in the new theme with the agent's values intact
+store.5 (amended): a snapshot is the composed document at its hash with the tones it was composed under; opened under another theme it shows as it was until the visitor's first turn or theme switch re-bases its untouched paths
+stream.1 (amended): the `add` event carries `node`, the composed node's document fragment, beside id, kind and slot, so the page builds it with three's loader at the event and does not wait for `done`; `remove` carries id and slot; the shapes are the renderer's contract
+tests.1 (amended): the composition from tones, the precedence of scene.7, the re-base of api.8 and the request's tones refused when malformed, each a test
