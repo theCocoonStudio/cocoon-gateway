@@ -1,3 +1,9 @@
 {
-  "_": "reviewed exceptions to scripts/lockfile-check.mjs, one per line: \"name@version\": { \"<rule>\": \"why\" }, the rule one of scripts, age, publisher, source; the line excuses that one refusal and nothing else, integrity and the registry's shape have no exception, a bare \"why\" excuses nothing; this file is code-owned"
+  "_": "reviewed exceptions to scripts/lockfile-check.mjs, one per line: \"name@version\": { \"<rule>\": \"why\" }, the rule one of scripts, age, publisher, source; the line excuses that one refusal and nothing else, integrity and the registry's shape have no exception, a bare \"why\" excuses nothing; this file is code-owned",
+  "body-parser@2.4.0": {
+    "publisher": "the version was published through npm's trusted publishing from GitHub Actions, with a provenance attestation on it, where 2.3.0 was published from the maintainer ulisesgascon's own account; the maintainers list is unchanged (ulisesgascon, jonchurch, wesleytodd, dougwilson); 2.4.0 is the fix for GHSA-27r3-jxmh-p828 (high, published 2026-10-23, the version a day before it); reviewed 2026-10-29"
+  },
+  "qs@6.17.1": {
+    "age": "published 2026-10-28, under seven days at review, as the fix for GHSA-6pq8-jhm2-2vcw (moderate, published 2026-10-27), by ljharb, the same account that published 6.16.0; no provenance attestation on the version, as the warning says; reviewed 2026-10-29"
+  }
 }
