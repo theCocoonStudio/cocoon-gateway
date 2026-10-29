@@ -97,7 +97,7 @@ abuse.3: the owner's rule, 2026-10-18: the agent is never expected to take abuse
 ## security
 
 sec.1: the service is a client of the gateway: a `site` role with its own client certificate and token (`scripts/certs.sh` gains the role), its rules in `config/policy.json` being POST on the anthropic upstream and nothing else, the gateway injecting the owner's model key for that role (a per-role credential on the upstream, `credentialByRole`, a gateway change in the first build's pull request) so the service holds no model key
-sec.2: the service holds two secrets: the site's token (api.1) and its own gateway token and certificate; both in the Droplet's env and secrets directory, written by the deploy, never in a repository
+sec.2: the service holds three secrets (amended 2026-10-29 at the deploy, scope.4; "two" before: the key of its own certificate was not counted): the site's token (api.1), its gateway client set (the role's token and key) and the key of its own certificate for the site's backend; in the Droplet's secrets directory for the agent alone, placed by the owner before the deploy and checked by it (docs/deploy.md step 9), never in a repository
 sec.3: the agent reaches nothing: the tools are functions over the state; the service's container reaches the gateway's address and nothing else
 sec.4: the prompt is data all the way: a field in the user message's content, never concatenated into the system prompt; the tools' arguments are the model's and are validated as the visitor's own input would be
 sec.5: the Next backend is the one caller (the Droplet's firewall, the token); a second caller is a second role and a second token, never a shared one

@@ -1,7 +1,8 @@
 // The agent's configuration: agent/rules.md's front matter (flat `key: value` lines between two `---` lines),
 // the body being the system prompt (docs/scene-agent.spec.md, loop.1, loop.2, words.2). Every number the
-// service runs on is here and nowhere else; a missing or malformed line refuses the start, and so does a
-// price of zero, since a spend ceiling counted against zero never fires.
+// service runs on is here and nowhere else, but the two prices: a missing or malformed line refuses the start,
+// and so does a price of zero unless the caller takes the prices on itself (`allowZeroPrices`), as the entry
+// does from the environment at deploy (src/agent-server.js), since a spend ceiling counted against zero never fires.
 const NUMBERS = {
   say_bound: 'sayBound', prompt_bound: 'promptBound', calls_per_turn: 'callsPerTurn', turn_seconds: 'turnSeconds',
   turns_per_visit: 'turnsPerVisit', visit_minutes: 'visitMinutes', spend_per_visit_usd: 'spendPerVisitUsd',

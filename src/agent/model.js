@@ -3,18 +3,25 @@
 // Proxy-Authorization, the request id in x-request-id so the gateway's line and the service's line meet; the
 // gateway injects the owner's model key for this role (credentialByRole), so none is here. `url` may be plain
 // http in the tests, as the gateway's own tests do with their fake upstream.
+//
+// `connect` pins the address dialed, the way curl's --resolve does in the sandbox's launcher: the URL's host
+// stays the name the gateway routes on (the Host header, the TLS server name the certificate is checked
+// against) while the socket goes to `connect.host:connect.port`. On the Droplet that is the gateway's
+// container by its Docker name on the network the two share (scripts/deploy-agent.sh), so the service
+// resolves no public name and sends nothing anywhere else. Absent, the URL's own host and port are dialed.
 import http from 'node:http';
 import https from 'node:https';
 
-export function createModel({ url, token, cert, key, ca, requestId, timeoutMs = 60_000 }) {
+export function createModel({ url, token, cert, key, ca, requestId, timeoutMs = 60_000, connect }) {
   const target = new URL(url);
   const client = target.protocol === 'http:' ? http : https;
+  const port = target.port || (client === https ? 443 : 80);
   return (request) => new Promise((resolve, reject) => {
     const body = JSON.stringify(request);
     const req = client.request({
-      host: target.hostname, port: target.port || (client === https ? 443 : 80), path: target.pathname, method: 'POST',
-      headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body), 'anthropic-version': '2023-06-01', 'proxy-authorization': `Bearer ${token}`, ...(requestId ? { 'x-request-id': requestId } : {}) },
-      ...(client === https ? { cert, key, ca, minVersion: 'TLSv1.3' } : {}),
+      host: connect ? connect.host : target.hostname, port: connect ? connect.port : port, path: target.pathname, method: 'POST',
+      headers: { host: target.host, 'content-type': 'application/json', 'content-length': Buffer.byteLength(body), 'anthropic-version': '2023-06-01', 'proxy-authorization': `Bearer ${token}`, ...(requestId ? { 'x-request-id': requestId } : {}) },
+      ...(client === https ? { cert, key, ca, minVersion: 'TLSv1.3', servername: target.hostname } : {}),
       timeout: timeoutMs,
     }, (res) => {
       let data = '';
