@@ -136,3 +136,11 @@ test('validateDocument: null for a good document; a wrong version, a size over t
   const depth = compose(table, s); depth.geometries[0].depth = 5;
   assert.match(validateDocument(table, depth, { version: 1, sizeCap }), /^main\.size: the document carries 5 at \/geometries\/0\/depth, not a number from 0\.5 to 3/, 'each of a path\'s targets is checked');
 });
+
+test('the composed document carries the representation\'s version in its metadata (scene.4 amended 2026-10-29), inside the hash', () => {
+  const doc = compose(table, initialState(table, 'webgpu'));
+  assert.deepEqual(doc.metadata.cocoon, { version: table.version });
+  const other = structuredClone(doc);
+  other.metadata.cocoon.version = table.version + 1;
+  assert.notEqual(hashOf(other), hashOf(doc));
+});

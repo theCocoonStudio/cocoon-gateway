@@ -96,6 +96,10 @@ export function loadTable(json) {
     if (typeof slot.target !== 'string' || !POINTER.test(slot.target)) fail(`slot ${name}: target must be a JSON pointer such as /object/children`);
     if (!Array.isArray(pointerGet(json.template, slot.target))) fail(`slot ${name}: target ${slot.target} is not an array in the template`);
   }
+  // the representation's version, stamped into the template where three's loader keeps its own metadata
+  // (scene.4 amended 2026-10-29), so every composed document carries it inside its hash and the page
+  // reads it before loading and refuses another version; the table file itself stays as written
+  json.template.metadata = { ...(json.template.metadata ?? {}), cocoon: { version: json.version } };
   return json;
 }
 
