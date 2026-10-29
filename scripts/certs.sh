@@ -15,6 +15,8 @@
 #                                                 (the keys of config/upstreams.json), 825 days
 #   certs.sh client <dir> <role>                 <role>.key, <role>.crt with CN=<role> (clientAuth), 825 days,
 #                                                 and <role>.token: 32 random bytes as hex, the role's bearer token
+#   certs.sh service <dir> <domain> <name>       <name>.key, <name>.crt for <name>.<domain> (serverAuth), 825 days: a
+#                                                 second service the same root vouches for (the scene agent, 2026-10-29)
 #
 # Keys are EC P-256 (fast, small, accepted by Node's TLS and by OpenSSL and LibreSSL alike). Extensions go
 # through a config file rather than -addext, which macOS's LibreSSL lacks; bash 3.2 suffices.
@@ -27,7 +29,7 @@ for tool in "${TOOLS[@]}"; do
   command -v "$tool" >/dev/null || { echo "certs: '$tool' is required" >&2; exit 1; }
 done
 
-usage() { sed -n '2,20p' "$0" >&2; exit 1; }
+usage() { sed -n '2,22p' "$0" >&2; exit 1; }
 [ $# -ge 2 ] || usage
 cmd=$1; dir=$2; shift 2
 mkdir -p -- "$dir"
@@ -82,6 +84,24 @@ case "$cmd" in
     rm -f -- "$dir/$role.csr"
     (umask 077 && openssl rand -hex 32 > "$dir/$role.token")
     echo "certs: client written for role '$role': $dir/$role.key (600), $dir/$role.crt, $dir/$role.token (600); the sandbox host gets these with root.crt, the gateway host gets a copy of the token as GATEWAY_TOKEN_$(printf '%s' "$role" | tr 'a-z-' 'A-Z_')"
+    ;;
+  service)
+    # The scene agent's own certificate for the site's backend (docs/scene-agent.spec.md api.1; docs/deploy.md step 9):
+    # a server certificate under the service's name, signed by the same root, so the backend trusts root.crt and
+    # nothing else. Its own file names, so the gateway's server.key and server.crt are never touched.
+    [ $# -eq 2 ] || usage
+    domain=$1; name=$2
+    case "$name" in *[!a-z0-9-]*|'') echo "certs: a service name is lowercase letters, digits and dashes" >&2; exit 1 ;; esac
+    fresh "$name.key" "$name.crt"
+    { [ -r "$dir/root.key" ] && [ -r "$dir/root.crt" ]; } || { echo "certs: no root in $dir; run 'certs.sh root $dir' first" >&2; exit 1; }
+    newkey "$dir/$name.key"
+    ext=$(mktemp); trap 'rm -f "${ext:?}"' EXIT
+    printf 'basicConstraints=CA:FALSE\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=serverAuth\nsubjectAltName=DNS:%s.%s\n' "$name" "$domain" > "$ext"
+    openssl req -new -sha256 -key "$dir/$name.key" -subj "/CN=$name.$domain" -out "$dir/$name.csr"
+    openssl x509 -req -in "$dir/$name.csr" -CA "$dir/root.crt" -CAkey "$dir/root.key" -CAcreateserial -sha256 -days 825 \
+      -extfile "$ext" -out "$dir/$name.crt"
+    rm -f -- "$dir/$name.csr"
+    echo "certs: service written for $name.$domain: $dir/$name.key (600) and $dir/$name.crt; copy both to the host that runs it, and root.crt to whatever calls it"
     ;;
   *) usage ;;
 esac
