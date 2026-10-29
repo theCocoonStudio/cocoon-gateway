@@ -54,7 +54,7 @@ export function rolesWithGithubRules(upstreams, policy) {
   return [...new Set((policy.rules || []).filter((r) => githubUpstreams.has(r.upstream)).map((r) => r.role))];
 }
 export function fromEnvironment(upstreams = { upstreams: {} }, policy = { roles: {}, rules: [] }, { fetchImpl = fetch } = {}) {
-  const kinds = new Set(Object.values(upstreams.upstreams).map((u) => u.credential).filter(Boolean));
+  const kinds = new Set(Object.values(upstreams.upstreams).flatMap((u) => [u.credential, ...Object.values(u.credentialByRole || {})]).filter(Boolean));
   const github = {};
   for (const role of rolesWithGithubRules(upstreams, policy)) {
     if (!/^[a-z][a-z0-9]*$/.test(role)) throw new Error(`credentials: role '${role}' cannot name environment variables (lowercase letters and digits only)`);

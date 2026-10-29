@@ -31,11 +31,14 @@ export function createApp({ upstreams, policy, credentials, roleOf, log = (line)
     const verdict = decide(compiled, role, key, req.method, req.path);
     if (!verdict.allow) return finish(403, { error: 'policy', detail: 'no rule allows this request' }, { role, upstream: key, rule: verdict.rule });
     const target = targetOf ? targetOf(key, upstream) : { host: upstream.host, port: 443, scheme: 'https' };
+    // the credential kind is the upstream's, or the role's own where the table names one (credentialByRole, 2026-10-19: the
+    // site's agent reaches the model under its role with the owner's key injected here, while the agents' CLIs pass their own)
+    const credentialKind = (upstream.credentialByRole && upstream.credentialByRole[role]) || upstream.credential;
     const path = rewritePath(req.originalUrl, upstream.rewrite);
-    const go = (body) => credentials.headersFor(upstream.credential, role).then(
+    const go = (body) => credentials.headersFor(credentialKind, role).then(
       (credentialHeaders) =>
         proxy(req, res, {
-          target, hostHeader: upstream.host, credentialHeaders, path, requestId, hostToSubdomain, passthrough: upstream.credential === 'passthrough', body,
+          target, hostHeader: upstream.host, credentialHeaders, path, requestId, hostToSubdomain, passthrough: credentialKind === 'passthrough', body,
           acceptEncoding: upstream.encoding, ...proxyOptions,
           onDone: ({ status, ms, bytes, detail }) => log({ ts: new Date().toISOString(), id: requestId, role, upstream: key, method: req.method, path, status, ms, bytes, rule: verdict.rule, ...(detail ? { detail } : {}) }),
         }),
