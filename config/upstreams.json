@@ -2,6 +2,8 @@
   "upstreams": {
     "github":       { "host": "api.github.com",    "credential": "github_app",       "rewrite": { "^/api/v3(/.*)$": "$1", "^/api/graphql$": "/graphql" } },
     "git":          { "host": "github.com",        "credential": "github_app_basic" },
+    "github-public": { "host": "api.github.com",  "credential": null },
+    "codeload":     { "host": "codeload.github.com", "credential": null },
     "anthropic":    { "host": "api.anthropic.com", "credential": "passthrough", "encoding": "identity" },
     "npm":          { "host": "registry.npmjs.org", "credential": null },
     "arxiv":        { "host": "arxiv.org",         "credential": null },

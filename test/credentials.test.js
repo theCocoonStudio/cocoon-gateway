@@ -58,6 +58,12 @@ test('each role with a GitHub rule holds its own App; the token injected is the 
   for (const k of Object.keys(process.env).filter((k) => k.startsWith('GITHUB_APP_'))) delete process.env[k];
 });
 
+test('a role whose GitHub rules are on an upstream with no credential (github-public, codeload: the launcher\'s box role) needs no App and is not counted', () => {
+  const ups = { upstreams: { ...upstreams.upstreams, 'github-public': { host: 'api.github.com', credential: null }, codeload: { host: 'codeload.github.com', credential: null } } };
+  const pol = { roles: { ...policy.roles, box: { cn: 'box' } }, rules: [...policy.rules, { role: 'box', upstream: 'github-public', method: 'GET', path: '^/repos/.*' }, { role: 'box', upstream: 'codeload', method: 'GET', path: '^/.*' }] };
+  assert.deepEqual(rolesWithGithubRules(ups, pol), ['claude', 'gemini']);
+});
+
 test('a role with GitHub rules and no App of its own refuses the start, by the variable\'s name', () => {
   Object.assign(process.env, { GITHUB_APP_CLAUDE_ID: '100001', GITHUB_APP_CLAUDE_INSTALLATION_ID: '11', GITHUB_APP_CLAUDE_PRIVATE_KEY: pem });
   assert.throws(() => fromEnvironment(upstreams, policy), /GITHUB_APP_GEMINI_ID \(or GITHUB_APP_GEMINI_ID_FILE\) is not set/);

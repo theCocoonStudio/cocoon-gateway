@@ -77,7 +77,7 @@ test('gemini holds the claude rule set minus the merge rule (the owner, 2026-10-
   const merge = rulesOf('claude').filter((r) => r.includes('(merge|update-branch)'));
   assert.equal(merge.length, 1, 'claude has the one merge rule');
   assert.deepEqual(rulesOf('gemini'), rulesOf('claude').filter((r) => !r.includes('(merge|update-branch)')));
-  assert.deepEqual(Object.keys(policy.roles), ['claude', 'gemini']);
+  assert.deepEqual(Object.keys(policy.roles), ['claude', 'gemini', 'box']); // box: the launcher's, two GET rules of its own (below), none of these
   const g = (u, m, p) => decide(c, 'gemini', u, m, p).allow;
   assert.equal(g('github', 'POST', `/api/v3/repos/${R}/pulls`), true);
   assert.equal(g('git', 'POST', `/${R}.git/git-receive-pack`), true);
@@ -85,4 +85,20 @@ test('gemini holds the claude rule set minus the merge rule (the owner, 2026-10-
   assert.equal(g('github', 'PUT', `/api/v3/repos/${R}/pulls/1/update-branch`), false);
   assert.equal(g('github', 'DELETE', '/api/v3/repos/o/r'), false);
   assert.equal(g('github', 'PATCH', '/api/v3/repos/o/r'), false);
+});
+
+test("the box role, the sandbox launcher's: the commit lookup and the tarball of a writable repository through the two public GitHub upstreams, no App, nothing else; no other role has them (2026-10-29)", () => {
+  const b = (u, m, p) => decide(c, 'box', u, m, p).allow;
+  assert.equal(b('github-public', 'GET', `/repos/${R}/commits/main`), true);
+  assert.equal(b('github-public', 'GET', `/api/v3/repos/${R}/tarball/${'a'.repeat(40)}`), true);
+  assert.equal(b('codeload', 'GET', `/${R}/legacy.tar.gz/${'a'.repeat(40)}`), true);
+  assert.equal(b('codeload', 'GET', `/${R}/legacy.tar.gz/refs/heads/main`), false); // a sha only, as the launcher asks
+  assert.equal(b('github-public', 'GET', '/repos/o/r/commits/main'), false); // not a writable repository
+  assert.equal(b('github-public', 'GET', `/repos/${R}/contents/README.md`), false);
+  assert.equal(b('github-public', 'POST', `/repos/${R}/pulls`), false);
+  assert.equal(b('github', 'GET', `/repos/${R}/commits/main`), false); // the App-credentialed upstream is not the box's
+  assert.equal(b('git', 'GET', `/${R}.git/info/refs`), false);
+  assert.equal(b('anthropic', 'POST', '/v1/messages'), false);
+  assert.equal(d('github-public', 'GET', `/repos/${R}/commits/main`), false); // claude reads GitHub through its App, never anonymously
+  assert.equal(d('codeload', 'GET', `/${R}/legacy.tar.gz/${'a'.repeat(40)}`), false);
 });
