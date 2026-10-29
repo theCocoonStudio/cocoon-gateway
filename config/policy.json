@@ -31,7 +31,7 @@
     {"role": "gemini", "upstream": "npm", "method": "POST", "path": "^/-/npm/v1/security/(advisories/bulk|audits/quick)$"},
     {"role": "gemini", "upstream": "arxiv", "method": "GET", "path": ".*"},
     {"role": "gemini", "upstream": "export-arxiv", "method": "GET", "path": ".*"},
-    {"role": "box", "upstream": "github-public", "method": "GET", "path": "^(/api/v3)?/repos/{writable}/(commits|tarball)/[^/]+$"},
+    {"role": "box", "upstream": "github-public", "method": "GET", "path": "^(/api/v3)?/repos/{writable}/commits/[^/]+$"},
     {"role": "box", "upstream": "codeload", "method": "GET", "path": "^/{writable}/legacy\\.tar\\.gz/[0-9a-f]{40}$"}
   ]
 }

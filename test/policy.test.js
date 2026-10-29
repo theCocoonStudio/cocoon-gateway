@@ -87,10 +87,11 @@ test('gemini holds the claude rule set minus the merge rule (the owner, 2026-10-
   assert.equal(g('github', 'PATCH', '/api/v3/repos/o/r'), false);
 });
 
-test("the box role, the sandbox launcher's: the commit lookup and the tarball of a writable repository through the two public GitHub upstreams, no App, nothing else; no other role has them (2026-10-29)", () => {
+test("the box role, the sandbox launcher's: the commit lookup of a writable repository through github-public and its tarball by sha through codeload, no App, nothing else; no other role has them (2026-10-29; the lookup rule narrowed to commits after the audit)", () => {
   const b = (u, m, p) => decide(c, 'box', u, m, p).allow;
   assert.equal(b('github-public', 'GET', `/repos/${R}/commits/main`), true);
-  assert.equal(b('github-public', 'GET', `/api/v3/repos/${R}/tarball/${'a'.repeat(40)}`), true);
+  assert.equal(b('github-public', 'GET', `/api/v3/repos/${R}/tarball/${'a'.repeat(40)}`), false); // the tarball is codeload's, by sha; the API route would only redirect there
+  assert.equal(b('github-public', 'GET', `/repos/${R}/commits/launcher%2Fthrough-the-gateway`), true); // a slashed ref arrives percent-encoded, one segment
   assert.equal(b('codeload', 'GET', `/${R}/legacy.tar.gz/${'a'.repeat(40)}`), true);
   assert.equal(b('codeload', 'GET', `/${R}/legacy.tar.gz/refs/heads/main`), false); // a sha only, as the launcher asks
   assert.equal(b('github-public', 'GET', '/repos/o/r/commits/main'), false); // not a writable repository
