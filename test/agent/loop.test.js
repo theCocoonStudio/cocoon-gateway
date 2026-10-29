@@ -33,6 +33,18 @@ test('a turn of three changes and a word: the events in order with the hash afte
   assert.deepEqual(r.events[0].input, { path: 'main.colour', value: '#ff0000' });
   assert.equal(r.events[2].result, 'slot:light.key');
   assert.equal(r.events[2].hash, hashOf(compose(table, r.state)));
+  // the renderer's form (stream.1 amended 2026-10-29): before, the writes of a set, the node and pointer of an add
+  const initialHash = hashOf(compose(table, initialState(table, 'webgpu')));
+  assert.equal(r.events[0].before, initialHash);
+  assert.equal(r.events[1].before, r.events[0].hash);
+  assert.equal(r.events[2].before, r.events[1].hash);
+  assert.deepEqual(r.events[0].writes, [{ pointer: '/materials/0/color', value: 0xff0000 }]);
+  assert.deepEqual(r.events[1].writes, [{ pointer: '/materials/0/roughness', value: 0.2 }]);
+  assert.equal(r.events[2].node.uuid, 'slot:light.key');
+  assert.equal(r.events[2].node.type, 'PointLight');
+  assert.equal(r.events[2].node.name, 'light.key');
+  assert.equal(r.events[2].pointer, '/object/children');
+  assert.equal(r.events[2].writes, undefined);
   assert.equal(r.state.values['main.colour'], '#ff0000');
   assert.equal(r.state.slots['light.key'].kind, 'point');
   assert.equal(model.asked[0].messages.length, 1);
@@ -109,4 +121,24 @@ test('text outside a tool call is dropped and logged, never an event; a model er
   assert.deepEqual(e.events, []);
   assert.equal(e.state.values['main.colour'], '#2a9d8f');
   assert.ok(e.log.some((l) => l.event === 'model_error'));
+});
+
+test("the renderer's form of a remove (the uuid and the slot's pointer), of an undo and of a reset (the whole document), and of a set that removes a key (fog none: null)", async () => {
+  const model = scripted([
+    { stop_reason: 'tool_use', usage, content: [use('a', 'add', { kind: 'point', slot: 'light.fill' }), use('b', 'set', { path: 'fog', value: 'thin' })] },
+    { stop_reason: 'tool_use', usage, content: [use('c', 'remove', { id: 'slot:light.fill' }), use('d', 'set', { path: 'fog', value: 'none' })] },
+    { stop_reason: 'tool_use', usage, content: [use('e', 'undo', { n: 1 }), use('f', 'reset', {})] },
+    { stop_reason: 'end_turn', usage, content: [] },
+  ]);
+  const r = await run(model);
+  const [added, fogOn, removed, fogOff, undone, reset] = r.events;
+  assert.equal(added.pointer, '/object/children');
+  assert.deepEqual(fogOn.writes, [{ pointer: '/object/fog', value: { type: 'Fog', color: 1053720, near: 5, far: 30 } }]);
+  assert.deepEqual({ uuid: removed.uuid, pointer: removed.pointer }, { uuid: 'slot:light.fill', pointer: '/object/children' });
+  assert.equal(removed.before, fogOn.hash);
+  assert.deepEqual(fogOff.writes, [{ pointer: '/object/fog', value: null }]);
+  assert.equal(typeof undone.document, 'object');
+  assert.equal(hashOf(undone.document), undone.hash);
+  assert.equal(hashOf(reset.document), reset.hash);
+  assert.equal(reset.hash, hashOf(compose(table, initialState(table, 'webgpu'))));
 });

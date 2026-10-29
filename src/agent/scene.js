@@ -155,6 +155,29 @@ export function readView(table, state) {
   return { paths, slots, history: state.history.length };
 }
 
+// The renderer's form of one path's value (stream.1): each target of the path as a JSON pointer into the composed
+// document, with the value as the document carries it (null meaning the key is removed), so the page lands a
+// `set` on its objects without holding the table.
+export function writesFor(table, path, value) {
+  const spec = table.paths[path];
+  const encoded = encode(spec, value);
+  return targetsOf(spec).map((pointer) => ({ pointer, value: encoded }));
+}
+
+// A filled slot's node as the document carries it: the kind's node with uuid `slot:<slot>`, name the slot's, and
+// the node's values encoded at their targets.
+export function nodeFor(table, name, filled) {
+  const kind = table.kinds[filled.kind];
+  const node = structuredClone(kind.node);
+  node.uuid = `slot:${name}`;
+  node.name = name;
+  for (const [value, spec] of Object.entries(kind.values)) {
+    const encoded = encode(spec, filled.values[value]);
+    for (const target of targetsOf(spec)) pointerSet(node, target, encoded);
+  }
+  return node;
+}
+
 // The document for the page: a clone of the template with every path's value encoded at its targets and every
 // filled slot's node appended to its slot's array, as uuid `slot:<slot>` and name the slot's name.
 export function compose(table, state) {
@@ -168,15 +191,7 @@ export function compose(table, state) {
   for (const [name, slot] of Object.entries(table.slots)) {
     const filled = state.slots[name];
     if (!filled) continue;
-    const kind = table.kinds[filled.kind];
-    const node = structuredClone(kind.node);
-    node.uuid = `slot:${name}`;
-    node.name = name;
-    for (const [value, spec] of Object.entries(kind.values)) {
-      const encoded = encode(spec, filled.values[value]);
-      for (const target of targetsOf(spec)) pointerSet(node, target, encoded);
-    }
-    pointerGet(doc, slot.target).push(node);
+    pointerGet(doc, slot.target).push(nodeFor(table, name, filled));
   }
   return doc;
 }
