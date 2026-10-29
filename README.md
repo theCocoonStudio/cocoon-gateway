@@ -66,7 +66,7 @@ The shape that keeps the client certificate: the gateway terminates TLS itself, 
 
 ## The scene agent
 
-The home page's agent over its 3D scene (records `site/scene-api.md`): a service on the Droplet beside the gateway, a client of it under a role of its own, specified in [docs/scene-agent.spec.md](docs/scene-agent.spec.md) item by item for the owner's strike (2026-10-19); its first build is `src/agent/` (the tools as pure functions, the loop with its bounds, the store, the endpoint as an event stream; no deploy yet, scope.4), and the gateway gained the `site` role whose model calls carry the owner's key, injected here (`credentialByRole` in `config/upstreams.json`), so the agent's service holds no model key.
+The home page's agent over its 3D scene (records `site/scene-api.md`): a service on the Droplet beside the gateway, a client of it under a role of its own, specified in [docs/scene-agent.spec.md](docs/scene-agent.spec.md) item by item for the owner's strike (2026-10-19); its first build is `src/agent/` (the tools as pure functions, the loop with its bounds, the store, the endpoint as an event stream; its deploy beside the gateway is `docs/deploy.md` step 9 and `scripts/deploy-agent.sh`, 2026-10-29), and the gateway gained the `site` role whose model calls carry the owner's key, injected here (`credentialByRole` in `config/upstreams.json`), so the agent's service holds no model key.
 
 ## Not in the first slice
 

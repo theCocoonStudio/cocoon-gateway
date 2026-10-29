@@ -42,6 +42,8 @@ SECRETS=/etc/cocoon-gateway      # the env file and the mounted files, owned by 
 PORT=443                         # the host port for clients that present the client certificate themselves; the container listens on 8443
 RELAY_PORT=8443                  # the same listener published a second time, for the sandbox's in-container relay: inside the container
                                  # port 443 to the gateway's address is redirected to the relay, so the relay dials a port that is not (8443)
+AGENT_NET=cocoon-agent           # the scene agent's network, made by scripts/deploy-agent.sh; the gateway joins it at this address
+AGENT_NET_GATEWAY_IP=172.30.0.2  # (the two values are repeated there, by name; a change is a PR to both blocks)
 API=https://api.github.com/repos
 TOOLS=(
   curl    # the commit lookup and the tarball
@@ -151,6 +153,10 @@ if docker inspect "$NAME" >/dev/null 2>&1; then
   docker rename "$NAME" "$NAME-previous"
 fi
 docker rename "$NAME-next" "$NAME"
+# The scene agent's network (scripts/deploy-agent.sh, 2026-10-29): when it exists, the new gateway joins it at the
+# address the agent's egress rule names, here, after the old one is stopped (it held that address until then) and
+# before the start; the probe never joins. Without the agent deployed there is no network and nothing to join.
+if docker network inspect "$AGENT_NET" >/dev/null 2>&1; then docker network connect --ip "$AGENT_NET_GATEWAY_IP" "$AGENT_NET" "$NAME"; fi
 docker start "$NAME" >/dev/null
 state=$(wait_healthy "$NAME")
 docker ps --filter "name=^$NAME$" --format 'deploy: {{.Names}} {{.Status}} {{.Ports}}'

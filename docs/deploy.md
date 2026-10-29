@@ -12,6 +12,8 @@ curl -fsSL https://raw.githubusercontent.com/theCocoonStudio/cocoon-gateway/main
 
 Writes, at mode 600 for the keys, refusing to overwrite: `root.key` and `root.srl` (stay here), `root.crt`, `server.key`, `server.crt`, `claude.key`, `claude.crt`, `claude.token`, `gemini.key`, `gemini.crt`, `gemini.token` (one client set per role in `config/policy.json`).
 
+The scene agent (step 9) adds a client set for its role and a server certificate of its own, from the same root: `bash certs.sh client ~/.config/cocoon/gateway site && bash certs.sh service ~/.config/cocoon/gateway DOMAIN agent`, which writes `site.key`, `site.crt`, `site.token`, `agent.key` and `agent.crt`.
+
 ## 2. What goes where
 
 | file | the box, `~/.config/cocoon/gateway/` | the Droplet, `/etc/cocoon-gateway/` |
@@ -74,6 +76,48 @@ Expected: one line of GitHub's zen. A 503 with `credential` in the body is that 
 
 The sandbox configuration (`~/.config/cocoon/sandbox.json`) gets the two gateway sections of the sandbox's `examples/cocoon-ai-gateway.json` with your `domain` and `address` in place of the documentation values. Then `cocoon --dry`, then `cocoon claude`. Once that start works, the App's private key can leave the box: nothing there reads it any more.
 
+## 9. The scene agent, beside the gateway (2026-10-29)
+
+The home page's agent (`docs/scene-agent.spec.md`): a second container from the image the gateway runs, with a different command, on a network of its own that the gateway joins; it reaches the gateway and nothing else, and the site's backend reaches it on 8444 with a bearer token over TLS. `scripts/deploy-agent.sh` carries every value and every security line with its reason; this step is what to put where.
+
+**On your machine:** step 1's two extra commands (the `site` client set and the `agent` service certificate), then `openssl rand -hex 32 > ~/.config/cocoon/gateway/backend.token && chmod 600 ~/.config/cocoon/gateway/backend.token`, the bearer the site's backend presents.
+
+**The site's platform** gets two secrets: the bytes of `backend.token` (its `Authorization: Bearer` to `https://agent.DOMAIN:8444`, or `IP:8444` with the name pinned, the way step 7 pins the gateway) and the contents of `root.crt`, the one certificate its HTTPS client trusts for that call. Both are yours to wire (spec scope.2); `agent.DOMAIN` is a name in `agent.crt`, not a public DNS record, unless you make one.
+
+**The Droplet's Cloud Firewall** gains inbound 8444 from the site platform's egress addresses, as the platform publishes them (spec sec.5: the firewall and the token are two locks). A platform with no fixed egress addresses leaves the token as the one lock on 8444 open to everyone: your call, said here so it is not made by omission.
+
+**On the Droplet, as root:** the directory, the files, the env file whole, the ownership, then the script.
+
+| file | from |
+|---|---|
+| `root.crt` | the same as the gateway's |
+| `site.key`, `site.crt`, `site.token` | step 1's `client ... site`; the token's bytes are also the gateway's `site.token` (the gateway verifies, the agent presents) |
+| `agent.key`, `agent.crt` | step 1's `service ... agent` |
+| `backend.token` | above |
+| `env` | below |
+
+```
+mkdir -m 700 /etc/cocoon-agent && printf '%s\n' 'GATEWAY_DOMAIN=DOMAIN' 'AGENT_GATEWAY_ADDRESS=cocoon-gateway:8443' 'AGENT_GATEWAY_CERT_FILE=/etc/cocoon-agent/site.crt' 'AGENT_GATEWAY_KEY_FILE=/etc/cocoon-agent/site.key' 'AGENT_GATEWAY_TOKEN_FILE=/etc/cocoon-agent/site.token' 'GATEWAY_CLIENT_CA_PUBLIC_FILE=/etc/cocoon-agent/root.crt' 'AGENT_TLS_KEY_FILE=/etc/cocoon-agent/agent.key' 'AGENT_TLS_CERT_FILE=/etc/cocoon-agent/agent.crt' 'AGENT_SITE_TOKEN_FILE=/etc/cocoon-agent/backend.token' 'AGENT_PRICE_INPUT_PER_MILLION_USD=INPUT_PRICE' 'AGENT_PRICE_OUTPUT_PER_MILLION_USD=OUTPUT_PRICE' > /etc/cocoon-agent/env && chown -R 1000:1000 /etc/cocoon-agent && chmod 600 /etc/cocoon-agent/* && ls -la /etc/cocoon-agent
+```
+
+`INPUT_PRICE` and `OUTPUT_PRICE` are the pinned model's prices in USD per million tokens, from its price page: `agent/rules.md` keeps them at zero on purpose (the one number the repository does not carry) and the service refuses to start on a missing or non-positive one, since a spend ceiling counted against zero never fires. Expected: eight files owned `1000 1000` at `-rw-------`. The gateway's directory is not mounted into the agent: it never sees the App keys or the model key.
+
+```
+curl -fsSL https://raw.githubusercontent.com/theCocoonStudio/cocoon-gateway/main/scripts/deploy-agent.sh -o deploy-agent.sh && bash deploy-agent.sh
+```
+
+The script refuses to run without a healthy gateway and takes its image tag from it (both halves are one commit); makes the `cocoon-agent` network on `172.30.0.0/29` (the agent's containers get `172.30.0.4` to `.6`) and joins the gateway to it at `172.30.0.2`; puts two iptables rules in place, one in `DOCKER-USER` refusing every new connection from the agent's addresses to anything but the gateway's (an outside name's lookup among them, since Docker forwards those from the container's own namespace) and one in `INPUT` refusing a new connection from those addresses to the Droplet itself, and a oneshot systemd unit ordered before Docker that puts both back at boot, before the containers return; then the gateway's three-move swap for the agent's container. It prints `deploy-agent: cocoon-agent Up ... (healthy) 0.0.0.0:8444->8444/tcp` and the container's last lines, ending with `{"agent":8444,"model":"...","gateway":"cocoon-gateway:8443"}` and `{"health":8080}`.
+
+**The check, from your machine** (the site role's own files, against the gateway, prove the model route; the backend token, against the agent, proves the endpoint):
+
+```
+curl -sS -w '\n%{http_code}\n' --cacert ~/.config/cocoon/gateway/root.crt -H "Authorization: Bearer $(cat ~/.config/cocoon/gateway/backend.token)" --resolve agent.DOMAIN:8444:IP https://agent.DOMAIN:8444/v1/scene/nobody-yet
+```
+
+Expected: `{"error":"none","detail":"no scene for this client; the page starts at the template","requestId":"..."}` then `404` (a client id of valid shape, 8 to 64 of `A-Za-z0-9_-`, with no scene; the token was accepted, the TLS name matched). A `401` with `{"error":"unauthenticated"}` is the token; a `400` with `"detail":"clientId"` is an id under eight characters; a handshake error is `agent.crt` or `root.crt`. Then one turn from the site's backend; its `say` and `change` events on the stream, and the gateway's log line for the model call under the role `site` with the same request id (`docker logs cocoon-gateway`), close the loop. The three egress checks, from the Droplet, each printing `refused:` and a code: an outside address, `docker exec cocoon-agent node -e 'fetch("https://1.1.1.1").then(()=>console.log("reached"),(e)=>console.log("refused:",e.cause?.code))'` (`ECONNREFUSED`, the forward rule); an outside name, `docker exec cocoon-agent node -e 'require("node:dns").promises.lookup("example.com").then(console.log,(e)=>console.log("refused:",e.code))'` (`EAI_AGAIN` or `ENOTFOUND`: the lookup's forward refused); the Droplet itself, `docker exec cocoon-agent node -e 'fetch("http://172.30.0.1:22").then(()=>console.log("reached"),(e)=>console.log("refused:",e.cause?.code))'` (`ECONNREFUSED`, the input rule). `iptables -S DOCKER-USER` and `iptables -S INPUT | grep br-cocoon-agent` show one line each.
+
+**What a swap loses:** the store is in memory (spec store.4): every visitor starts at the template after a redeploy or a restart. **What the rules file is:** `agent/rules.md`'s body is the placeholder until the persona's own pull request (records issue #87, deliverable 8); the agent runs with it until then.
+
 ## Redeploying
 
 After a merge to main, on the Droplet, as root. A role added to `config/policy.json` needs its token file in `/etc/cocoon-gateway/` and its `GATEWAY_TOKEN_<ROLE>_FILE` line in `env` first: the server refuses to start without every role's token, and the deploy's file check names the missing file (gemini joined claude on 2026-10-14). **Since 2026-10-16 each role is its own GitHub App** (one App served every role before, so a gemini container acted as the claude App's bot on GitHub): on the Droplet, `mv /etc/cocoon-gateway/app.pem /etc/cocoon-gateway/claude-app.pem`, add `gemini-app.pem` (the gemini App's private key, copied from your machine), write `env` whole again with step 5's `printf` (every line, the six per-role ones among them; never an in-place edit of that file: on 2026-10-16 a pasted `sed -i` chain left it with three lines of twelve and the gateway down), `chown`/`chmod` as in step 5, then redeploy; the deploy refuses the old names and a missing pem by name.
@@ -82,7 +126,7 @@ After a merge to main, on the Droplet, as root. A role added to `config/policy.j
 curl -fsSL https://raw.githubusercontent.com/theCocoonStudio/cocoon-gateway/main/scripts/deploy-droplet.sh -o deploy-droplet.sh && bash deploy-droplet.sh
 ```
 
-The script downloads main again and builds it. **The site role (2026-10-19, the scene agent's first build):** on your machine `certs.sh client <dir> site`; on the Droplet copy `site.token` into `/etc/cocoon-gateway/`, write the owner's model key to `/etc/cocoon-gateway/anthropic.key` (mode 600, owner 1000), write `env` whole again with step 5's `printf` (two more lines), then redeploy: the server refuses to start without the token, and without the key once the role names the `anthropic` kind. The agent's own deploy (its container beside the gateway, its certificate for the Next backend, `agent/rules.md`'s two prices) is the step after its first build and is not here yet. The swap is in three moves (2026-10-16): the new image is started once beside the old one with no ports and must come up healthy within 60 s, or the deploy stops with its first lines printed and the old gateway untouched; then the old container is stopped and kept, the new one takes the name and is waited for; healthy, the old container and image go; not healthy, the new one is removed and the old one is started again. Before that day the old container was removed before the new one had started, and a bad env file left no gateway for forty minutes.
+The script downloads main again and builds it. **The site role (2026-10-19, the scene agent's first build):** on your machine `certs.sh client <dir> site`; on the Droplet copy `site.token` into `/etc/cocoon-gateway/`, write the owner's model key to `/etc/cocoon-gateway/anthropic.key` (mode 600, owner 1000), write `env` whole again with step 5's `printf` (two more lines), then redeploy: the server refuses to start without the token, and without the key once the role names the `anthropic` kind. The agent's own deploy (its container beside the gateway, its certificate for the Next backend, the two prices) is step 9; after every gateway redeploy, run step 9's script again so the agent runs the same commit (it refuses an image the gateway does not run). The swap is in three moves (2026-10-16): the new image is started once beside the old one with no ports and must come up healthy within 60 s, or the deploy stops with its first lines printed and the old gateway untouched; then the old container is stopped and kept, the new one takes the name and is waited for; healthy, the old container and image go; not healthy, the new one is removed and the old one is started again. Before that day the old container was removed before the new one had started, and a bad env file left no gateway for forty minutes.
 
 ## Reading the gateway
 
