@@ -58,7 +58,12 @@ The shape that keeps the client certificate: the gateway terminates TLS itself, 
 - `scripts/audit.sh`: the dependency check for a cron.
 - `scripts/certs.sh`: the private root, the server certificate, a client certificate and token per role.
 - `scripts/deploy-droplet.sh`: the deploy on a Droplet, run there as root.
+- `docs/scene-agent.spec.md`: the scene agent's service spec, the items for the owner's strike.
 - `Dockerfile`: the image, the same in every shape.
+
+## The scene agent
+
+The home page's agent over its 3D scene (records `site/scene-api.md`): a service on the Droplet beside the gateway, a client of it under a role of its own, specified in [docs/scene-agent.spec.md](docs/scene-agent.spec.md) item by item for the owner's strike (2026-10-19); its first build follows the spec.
 
 ## Not in the first slice
 
